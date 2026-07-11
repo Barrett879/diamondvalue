@@ -40,6 +40,7 @@ BAT_DISPLAY = {
     "HR": ("rate", {"HR": 1}),
     "BB": ("rate", {"BB": 1}),
     "SO": ("rate", {"SO": 1}),
+    "b1": ("rate", {"b1": 1}),
     "b2": ("rate", {"b2": 1}),
     "b3": ("rate", {"b3": 1}),
     "R": ("direct", "R"),
