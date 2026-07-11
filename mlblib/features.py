@@ -89,10 +89,22 @@ def attach_catchers(history: pd.DataFrame) -> pd.DataFrame:
 class Context:
     """Season-level reference tables, loaded once and queried with the Y-1 rule."""
 
+    # Statcast quality-of-contact tables: {short name: filename stem}. Loaded
+    # per year and queried with the same Y-1 prior-year rule as park factors.
+    STATCAST_TABLES = {
+        "xbat": "statcast_xstats_bat",
+        "xpit": "statcast_xstats_pit",
+        "evbat": "statcast_ev_bat",
+        "evpit": "statcast_ev_pit",
+        "sprint": "sprint_speed",
+    }
+
     def __init__(self, years: list[int]):
         self.park: dict[int, pd.DataFrame] = {}
         self.framing: dict[int, pd.DataFrame] = {}
         self.throwing: dict[int, pd.DataFrame] = {}
+        self.statcast: dict[str, dict[int, pd.DataFrame]] = {
+            k: {} for k in self.STATCAST_TABLES}
         for y in years:
             pk = cache.read_parquet_or_none(cache.dc_path(f"park_factors_{y}_v1.parquet"))
             if pk is not None:
@@ -103,10 +115,39 @@ class Context:
             th = cache.read_parquet_or_none(cache.dc_path(f"catcher_throwing_{y}_v1.parquet"))
             if th is not None:
                 self.throwing[y] = th
+            for key, stem in self.STATCAST_TABLES.items():
+                sc = cache.read_parquet_or_none(cache.dc_path(f"{stem}_{y}_v1.parquet"))
+                if sc is not None:
+                    self.statcast[key][y] = sc
         self._years = sorted(self.park.keys())
         self._park_all = self._concat(self.park)
         self._framing_all = self._concat(self.framing)
         self._throwing_all = self._concat(self.throwing)
+        self._statcast_all = {k: self._concat(v) for k, v in self.statcast.items()}
+
+    def statcast_lookup(self, seasons, person_ids, which: str, col: str) -> np.ndarray:
+        """Vectorized Y-1 lookup of one Statcast column for many players.
+
+        `which` is a STATCAST_TABLES key; `col` a column of that table. Rows
+        whose player is absent from the prior-year table return NaN (HistGB
+        routes missing natively).
+        """
+        src = self._statcast_all.get(which)
+        n = len(seasons)
+        if src is None or src.empty or col not in src.columns:
+            return np.full(n, np.nan)
+        years = sorted(self.statcast[which].keys())
+        pyr = {s: max((y for y in years if y < s), default=None)
+               for s in pd.unique(seasons)}
+        key = pd.DataFrame({
+            "_i": np.arange(n),
+            "season": [pyr.get(s) for s in seasons],
+            "player_id": pd.to_numeric(pd.Series(person_ids), errors="coerce"),
+        })
+        ref = src[["season", "player_id", col]].rename(columns={col: "_val"})
+        ref = ref.drop_duplicates(subset=["season", "player_id"])
+        merged = key.merge(ref, on=["season", "player_id"], how="left").sort_values("_i")
+        return pd.to_numeric(merged["_val"], errors="coerce").values
 
     @staticmethod
     def _concat(table: dict) -> pd.DataFrame:
@@ -424,6 +465,21 @@ def _assemble_batter_feature_cols(df, league, ctx, universe,
         # identity is still captured (attach_catchers) for display and future
         # use. See docs/decisions.md.
 
+        # Statcast quality-of-contact priors (Y-1): contact quality is more
+        # stable than outcomes, so last season's expected stats, exit velocity,
+        # and barrel rate sharpen the talent prior. Sprint speed feeds SB.
+        pids = df["personId"].values
+        f["sc_xwoba"] = ctx.statcast_lookup(seasons, pids, "xbat", "est_woba")
+        f["sc_xslg"] = ctx.statcast_lookup(seasons, pids, "xbat", "est_slg")
+        f["sc_avg_ev"] = ctx.statcast_lookup(seasons, pids, "evbat", "avg_hit_speed")
+        f["sc_brl_pct"] = ctx.statcast_lookup(seasons, pids, "evbat", "brl_percent")
+        f["sc_hardhit"] = ctx.statcast_lookup(seasons, pids, "evbat", "ev95percent")
+        f["sc_sprint"] = ctx.statcast_lookup(seasons, pids, "sprint", "sprint_speed")
+        # Opposing starter's contact quality allowed (Y-1).
+        opp_ids = pd.to_numeric(_series(df, "oppStarterId"), errors="coerce").values
+        f["opp_sc_xwoba"] = ctx.statcast_lookup(seasons, opp_ids, "xpit", "est_woba")
+        f["opp_sc_brl_pct"] = ctx.statcast_lookup(seasons, opp_ids, "evpit", "brl_percent")
+
     # Age.
     if universe is not None:
         bmap = dict(zip(universe["personId"], universe["birthDate"]))
@@ -629,6 +685,13 @@ def _assemble_pitcher_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
                           ("index_bb", "pf_bb"), ("index_woba", "pf_woba")]:
             f[name] = pk[col].values
         # Own-catcher framing deferred to v2 (see batter assembly note).
+
+        # Statcast quality-of-contact allowed (Y-1): xwOBA-against and barrel
+        # rate against are stabler talent signals than outcome rates.
+        pids = df["personId"].values
+        f["sc_xwoba_ag"] = ctx.statcast_lookup(seasons, pids, "xpit", "est_woba")
+        f["sc_avg_ev_ag"] = ctx.statcast_lookup(seasons, pids, "evpit", "avg_hit_speed")
+        f["sc_brl_pct_ag"] = ctx.statcast_lookup(seasons, pids, "evpit", "brl_percent")
 
     if universe is not None:
         bmap = dict(zip(universe["personId"], universe["birthDate"]))

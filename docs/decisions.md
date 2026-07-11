@@ -78,6 +78,31 @@ pin down, so Barrett can audit later. Newest at the bottom.
   enrichment (biggest known lever, heavy pulls), weather, umpire tendencies,
   proper per-PA platoon data, opposing bullpen quality.
 
+## Accuracy round 3: Statcast (2026-07-11)
+
+- Built season-level Statcast tables from Savant (scripts/build_statcast_
+  tables.py): expected stats (bat+pit), exit velo/barrels (bat+pit), sprint
+  speed, years 2018-2026. Year filtering VERIFIED per leaderboard (unlike the
+  catcher boards): Judge avg EV 97.6 (2023) vs 96.2 (2024); Ohtani sprint
+  27.8 vs 28.1.
+- Whole-block walk-forward on 2025 was mixed (deviance better 15/18, MAE
+  slightly worse on most batter stats, R/RBI lost their season-avg pass), so
+  ran a PER-TARGET ablation on the 2024 VALIDATION year (exp_statcast_
+  ablation.py) to avoid test-set shopping.
+- Verdict: the quality-of-contact block does not reliably beat the existing
+  Marcel + shrunk-rate priors for any target. The exception is SPRINT SPEED
+  for stolen bases: SB Poisson deviance improved 3.8% on 2024 AND 3.0% on
+  2025 (independent years). SB MAE ticked up ~0.5-2%, which is the expected
+  artifact of a rare-event model daring to predict nonzero; the spec's 4.5
+  pre-registered deviance-over-MAE as the SB decision rule.
+- SHIPPED: per-target feature policy in mlblib/model.py (target_feature_cols):
+  Statcast columns train ONLY the SB model; all other targets train without
+  them. Features are still computed for all rows (cheap, and the SB model and
+  future rounds use them).
+- Lesson recorded: at per-game granularity, outcome-based priors already
+  carry most of the contact-quality signal; Statcast's marginal value here is
+  in rare-event skills (speed -> steals), not general hitting quality.
+
 ## Phase 4 (daily pipeline)
 
 - INFERENCE HISTORY FILTER (important): build_daily_predictions filters history

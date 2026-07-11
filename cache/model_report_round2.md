@@ -15,7 +15,7 @@ Train seasons [2021, 2022, 2023], test season 2025. Every stat is evaluated at t
 - `b3` [WEAK]: no better than a season average; show with caveat or drop (model MAE 0.025 vs season-avg 0.025, Marcel 0.027).
 - `R` [PASS]: beats season-average and Marcel baselines (model MAE 0.540 vs season-avg 0.541, Marcel 0.552).
 - `RBI` [PASS]: beats season-average and Marcel baselines (model MAE 0.579 vs season-avg 0.580, Marcel 0.591).
-- `SB` [WEAK]: no better than a season average; show with caveat or drop (model MAE 0.114 vs season-avg 0.124, Marcel 0.123).
+- `SB` [WEAK]: no better than a season average; show with caveat or drop (model MAE 0.113 vs season-avg 0.124, Marcel 0.123).
 
 **Pitching**
 - `p_outs` [PASS]: beats season-average and Marcel baselines (model MAE 2.809 vs season-avg 2.971, Marcel 3.047).
@@ -40,7 +40,7 @@ Train seasons [2021, 2022, 2023], test season 2025. Every stat is evaluated at t
 | b3     | 50887 |      0.0251 |   0.0245 |   0.0249 |   0.0266 |      0.1074 |   0.28   |   0.1068 |
 | R      | 50887 |      0.5403 |   0.5521 |   0.5408 |   0.5524 |      0.9383 |   1.339  |   0.9532 |
 | RBI    | 50887 |      0.5793 |   0.586  |   0.58   |   0.5914 |      1.1451 |   1.6753 |   1.1566 |
-| SB     | 50887 |      0.114  |   0.1118 |   0.1235 |   0.1228 |      0.3603 |   0.6354 |   0.348  |
+| SB     | 50887 |      0.1134 |   0.1118 |   0.1235 |   0.1228 |      0.3713 |   0.6354 |   0.348  |
 
 ## Pitching detail
 

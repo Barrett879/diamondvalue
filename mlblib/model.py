@@ -52,6 +52,27 @@ def feature_columns(feat: pd.DataFrame) -> list[str]:
     return [c for c in feat.columns if c not in ID_COLS]
 
 
+# Per-target Statcast policy, decided on the 2024 validation year (see
+# scripts/exp_statcast_ablation.py and docs/decisions.md): the quality-of-
+# contact block did not reliably beat the existing priors anywhere EXCEPT
+# stolen bases, where sprint speed improved Poisson deviance by ~3.8% on 2024
+# and ~3.0% on 2025 (two independent years). Every other target trains without
+# the Statcast columns.
+STATCAST_COLS = [
+    "sc_xwoba", "sc_xslg", "sc_avg_ev", "sc_brl_pct", "sc_hardhit",
+    "sc_sprint", "opp_sc_xwoba", "opp_sc_brl_pct",
+    "sc_xwoba_ag", "sc_avg_ev_ag", "sc_brl_pct_ag",
+]
+STATCAST_TARGETS = {"SB"}
+
+
+def target_feature_cols(target: str, all_cols: list[str]) -> list[str]:
+    """The feature list one target's model trains on (the Statcast policy)."""
+    if target in STATCAST_TARGETS:
+        return list(all_cols)
+    return [c for c in all_cols if c not in STATCAST_COLS]
+
+
 def _artifact_file(target: str):
     from pathlib import Path
     return Path(__file__).resolve().parent.parent / "models" / f"{target}_histgb_{MODEL_VERSION}.joblib"
