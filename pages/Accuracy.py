@@ -45,6 +45,23 @@ if {"stat", "abs_err_model", "abs_err_b2"}.issubset(acc.columns):
                .reset_index())
     summary["edge"] = (summary["seasonavg_MAE"] - summary["model_MAE"]).round(3)
     summary = summary.round(3)
+
+    import plotly.graph_objects as go
+
+    from mlblib.theme import theme_fig
+
+    chart = summary.sort_values("edge", ascending=False)
+    fig = go.Figure()
+    fig.add_bar(name="Model", x=chart["stat"], y=chart["model_MAE"],
+                marker_color="#17b890")
+    fig.add_bar(name="Season average", x=chart["stat"], y=chart["seasonavg_MAE"],
+                marker_color="#8a97a0")
+    fig.update_layout(barmode="group", height=360,
+                      margin=dict(l=10, r=10, t=30, b=10),
+                      legend=dict(orientation="h", y=1.12),
+                      yaxis_title="Mean absolute error (lower is better)")
+    st.plotly_chart(theme_fig(fig), use_container_width=True)
+
     st.dataframe(summary, hide_index=True, use_container_width=True)
 
 st.markdown("**Scored predictions**")

@@ -49,7 +49,26 @@ if "slate_date" not in st.session_state:
     st.session_state["slate_date"] = (
         parse_iso_date(st.query_params.get("date")) or parse_iso_date(today_iso()))
 
-st.date_input("Game date", key="slate_date", on_change=_mirror_date)
+
+def _jump(days_delta: int):
+    import datetime as _dt
+
+    base = parse_iso_date(today_iso())
+    st.session_state["slate_date"] = base + _dt.timedelta(days=days_delta)
+    _mirror_date()
+
+
+c_date, c_yday, c_today = st.columns([5, 1, 1])
+with c_date:
+    st.date_input("Game date", key="slate_date", on_change=_mirror_date)
+with c_yday:
+    st.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
+    st.button("Yesterday", key="jump_yday", on_click=_jump, args=(-1,),
+              use_container_width=True)
+with c_today:
+    st.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
+    st.button("Today", key="jump_today", on_click=_jump, args=(0,),
+              use_container_width=True)
 _mirror_date()
 date_iso = st.session_state["slate_date"].isoformat()
 dark = st.session_state.get("theme_dark", False)

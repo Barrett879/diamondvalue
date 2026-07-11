@@ -5,13 +5,16 @@ __pycache__/
 *.tmp*
 
 # Cache: ignore parquet/pkl/json by default, then un-ignore the small committed
-# snapshot files the deploy image needs. Big rebuildable artifacts (training
-# backfill logs, raw boxscore JSON) stay OUT of git and rebuild from the API.
+# snapshot files the deploy image needs. Raw boxscore JSON (2.8GB) stays OUT of
+# git and rebuilds from the API. The per-season gamelog parquets ARE committed
+# (~9MB total): the daily GitHub Action needs them to append each day's games
+# without a full refetch, and a fresh clone gets working features offline.
 cache/*.parquet
 cache/*.pkl
 cache/*.json
+cache/*.log
 cache/raw_boxscores/
-cache/gamelogs_*.parquet
+!cache/gamelogs_*.parquet
 !cache/park_factors_*.parquet
 !cache/catcher_framing_*.parquet
 !cache/catcher_throwing_*.parquet
