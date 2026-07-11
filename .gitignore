@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.DS_Store
+.pytest_cache/
+*.tmp*
+
+# Cache: ignore parquet/pkl/json by default, then un-ignore the small committed
+# snapshot files the deploy image needs. Big rebuildable artifacts (training
+# backfill logs, raw boxscore JSON) stay OUT of git and rebuild from the API.
+cache/*.parquet
+cache/*.pkl
+cache/*.json
+cache/raw_boxscores/
+cache/gamelogs_*.parquet
+!cache/park_factors_*.parquet
+!cache/catcher_framing_*.parquet
+!cache/catcher_throwing_*.parquet
+!cache/player_universe_*.parquet
+!cache/predictions_*.parquet
+!cache/slate_*.json
+!cache/accuracy_history_*.parquet

@@ -1,0 +1,29 @@
+# ==========================================================================
+# WARNING: for a service created from the Render DASHBOARD, this file is
+# IGNORED. The dashboard Build Command and Start Command are authoritative and
+# must be set MANUALLY:
+#
+#   Build Command:  pip install -r requirements.txt
+#   Start Command:  python serve.py
+#
+# A bare "streamlit run app.py" Start Command silently skips serve.py and all
+# its cache warming. Also set the persistent disk (mount path /data, ~1 GB) and
+# the PYTHON_VERSION env var (Render's default moved to 3.14, which has no
+# wheels for the pinned pyarrow/numpy). This YAML is kept only as documentation
+# of the intended config.
+# ==========================================================================
+services:
+  - type: web
+    name: diamondvalue
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python serve.py
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+    disk:
+      name: diamondvalue-cache
+      mountPath: /data
+      sizeGB: 1

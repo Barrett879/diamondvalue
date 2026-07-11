@@ -1,0 +1,18 @@
+# DiamondValue dependencies. Exact pins on everything.
+#
+# scikit-learn and joblib are pinned to the exact versions the shipped model
+# artifacts in models/ were saved with. Version drift silently breaks
+# joblib.load on a Render rebuild, so DO NOT bump these two without retraining
+# and re-committing the artifacts.
+streamlit==1.51.0
+numpy==2.3.5
+pandas==2.3.3
+pyarrow==21.0.0
+plotly==6.3.0
+scikit-learn==1.7.2
+joblib==1.5.2
+requests==2.32.5
+
+# Dev only (tests). Harmless in production; keeps the leakage tests runnable
+# anywhere the app installs.
+pytest==8.3.4

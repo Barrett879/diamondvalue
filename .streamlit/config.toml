@@ -1,0 +1,16 @@
+# Base theme is light so iframe components (which CSS variables can't reach)
+# render on a light surface by default; the token system in mlblib/theme.py
+# handles the runtime light/dark flip for everything CSS can style.
+[theme]
+base = "light"
+
+[server]
+headless = true
+enableXsrfProtection = false
+enableStaticServing = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+showErrorDetails = "none"

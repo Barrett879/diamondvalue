@@ -1,0 +1,24 @@
+[diamondvalue] WARNING history rows: 817779 (seasons [np.int64(2019), np.int64(2020), np.int64(2021), np.int64(2022), np.int64(2023), np.int64(2024), np.int64(2025)])
+[diamondvalue] WARNING [bat] building features ...
+[diamondvalue] WARNING [bat] 263996 feature rows, 36 feature cols
+[diamondvalue] WARNING   saved PA_histgb_m1.joblib (263996 rows)
+[diamondvalue] WARNING   saved b1_histgb_m1.joblib (246216 rows)
+[diamondvalue] WARNING   saved b2_histgb_m1.joblib (246216 rows)
+[diamondvalue] WARNING   saved b3_histgb_m1.joblib (246216 rows)
+[diamondvalue] WARNING   saved HR_histgb_m1.joblib (246216 rows)
+[diamondvalue] WARNING   saved BB_histgb_m1.joblib (246216 rows)
+[diamondvalue] WARNING   saved HBP_histgb_m1.joblib (246216 rows)
+[diamondvalue] WARNING   saved SO_histgb_m1.joblib (246216 rows)
+[diamondvalue] WARNING   saved R_histgb_m1.joblib (263996 rows)
+[diamondvalue] WARNING   saved RBI_histgb_m1.joblib (263996 rows)
+[diamondvalue] WARNING   saved SB_histgb_m1.joblib (263996 rows)
+[diamondvalue] WARNING [pit] building features ...
+[diamondvalue] WARNING [pit] 24296 feature rows, 24 feature cols
+[diamondvalue] WARNING   saved p_outs_histgb_m1.joblib (24296 rows)
+[diamondvalue] WARNING   saved p_BF_histgb_m1.joblib (24296 rows)
+[diamondvalue] WARNING   saved p_K_histgb_m1.joblib (24293 rows)
+[diamondvalue] WARNING   saved p_BB_histgb_m1.joblib (24293 rows)
+[diamondvalue] WARNING   saved p_H_histgb_m1.joblib (24293 rows)
+[diamondvalue] WARNING   saved p_HR_histgb_m1.joblib (24293 rows)
+[diamondvalue] WARNING   saved p_ER_histgb_m1.joblib (24296 rows)
+[diamondvalue] WARNING done.
