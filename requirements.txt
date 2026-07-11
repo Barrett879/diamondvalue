@@ -4,13 +4,17 @@
 # artifacts in models/ were saved with. Version drift silently breaks
 # joblib.load on a Render rebuild, so DO NOT bump these two without retraining
 # and re-committing the artifacts.
-streamlit==1.51.0
+# Streamlit Community Cloud builds on Python 3.14 and ignores the version pins
+# in runtime.txt/.python-version. That forces two coupled bumps:
+#  - pyarrow 22 is the first release with a 3.14 wheel (21 has none, so it tried
+#    to compile from source and failed on a missing cmake). 22 reads parquet
+#    written by 21 and is not tied to the joblib model artifacts.
+#  - streamlit 1.51.0 caps pyarrow at <22; 1.53.1+ relaxed it to pyarrow>=7.0,
+#    so we run 1.59.x to allow pyarrow 22. Only stable core APIs are used.
+# Both are pure-py / have 3.14 wheels, so the set resolves on 3.12-3.14.
+streamlit==1.59.1
 numpy==2.3.5
 pandas==2.3.3
-# pyarrow 22 is the first release with Python 3.14 wheels. Streamlit Community
-# Cloud builds on 3.14 and ignores runtime.txt/.python-version, so 21.0.0 tried
-# to compile from source and failed (no cmake). 22 has wheels for 3.12-3.14 and
-# reads parquet written by 21; pyarrow is not tied to the joblib model artifacts.
 pyarrow==22.0.0
 plotly==6.3.0
 scikit-learn==1.7.2
