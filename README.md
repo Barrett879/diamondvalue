@@ -3,11 +3,9 @@ title: DiamondValue
 emoji: ⚾
 colorFrom: green
 colorTo: blue
-sdk: streamlit
-sdk_version: 1.51.0
-app_file: app.py
+sdk: docker
+app_port: 7860
 pinned: false
-python_version: "3.12.8"
 license: mit
 ---
 
