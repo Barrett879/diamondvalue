@@ -232,12 +232,19 @@ def render_page_chrome() -> None:
 
 
 def render_nav(current: str) -> None:
-    """Top nav bar. `current` matches a label in _NAV_PAGES (or "Home")."""
-    links = '<a class="home-link" href="/" target="_top">Home</a>'
+    """Top nav bar. `current` matches a label in _NAV_PAGES (or "Home").
+
+    Links use target="_self" (the default), NOT "_top": Streamlit Community
+    Cloud serves the app inside an iframe, and "_top" would navigate the outer
+    wrapper (wrong origin) instead of the app frame, so the links appear dead.
+    "_self" navigates the app's own frame, which works whether the app is
+    iframed (Streamlit Cloud) or served directly (local/Render).
+    """
+    links = '<a class="home-link" href="/" target="_self">Home</a>'
     links += '<span class="divider">|</span>'
     for label, url in _NAV_PAGES:
         cls = "active" if label == current else ""
-        links += f'<a class="{cls}" href="{url}" target="_top">{label}</a>'
+        links += f'<a class="{cls}" href="{url}" target="_self">{label}</a>'
     st.markdown(f'<div class="top-nav">{links}</div>', unsafe_allow_html=True)
 
 
