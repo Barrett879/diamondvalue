@@ -18,6 +18,12 @@ cache/raw_boxscores/
 !cache/park_factors_*.parquet
 !cache/statcast_*.parquet
 !cache/sprint_speed_*.parquet
+!cache/arsenal_*.parquet
+!cache/disc_*.parquet
+!cache/game_weather_v1.parquet
+!cache/venues_v1.parquet
+!cache/tto_pit_*.parquet
+!cache/fbvelo_*.parquet
 !cache/catcher_framing_*.parquet
 !cache/catcher_throwing_*.parquet
 !cache/player_universe_*.parquet

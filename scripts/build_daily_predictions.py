@@ -142,6 +142,61 @@ def build_targets(slate, history, uni):
     return pd.DataFrame(bat_rows), pd.DataFrame(pit_rows), slate_meta
 
 
+def _game_environment(slate: list[dict], history: pd.DataFrame) -> dict:
+    """Per-gamePk pregame environment: forecast temp, park-relative wind-out
+    component, roof state, and (when posted) the HP umpire.
+
+    Dome: 72F, no wind, roof=1. Retractable roof: forecast weather with the
+    wind dampened by the venue's historical closed share (roof state unknown
+    pregame). Open: forecast as-is. Umpires populate via GUMBO only once a
+    game hits Pre-Game status, so morning runs carry None (models route NaN).
+    """
+    venues = cache.read_parquet_or_none(cache.dc_path("venues_v1.parquet"))
+    gw = cache.read_parquet_or_none(cache.dc_path("game_weather_v1.parquet"))
+    if venues is None:
+        return {}
+    vmap = venues.set_index("venue_id").to_dict("index")
+    closed_share = {}
+    if gw is not None and not history.empty:
+        vg = history[["gamePk", "venue_id"]].drop_duplicates().merge(
+            gw[["gamePk", "roof_closed"]], on="gamePk", how="inner")
+        closed_share = vg.groupby("venue_id")["roof_closed"].mean().to_dict()
+
+    env = {}
+    for g in slate:
+        v = vmap.get(g.get("venue_id"))
+        rec = {"temp_f": np.nan, "wind_out": np.nan, "roof_closed": np.nan,
+               "hp_ump": None}
+        if v is not None:
+            roof = (v.get("roofType") or "Open")
+            if roof == "Dome":
+                rec.update(temp_f=72.0, wind_out=0.0, roof_closed=1.0)
+            else:
+                fc = fetch.get_forecast(v["lat"], v["lon"],
+                                        g["officialDate"]) or {}
+                hour_key = (g.get("gameDate") or "")[:13] + ":00"
+                got = fc.get(hour_key)
+                if got:
+                    temp, ws, wd = got
+                    az = v.get("azimuth")
+                    if az is not None and ws is not None and wd is not None:
+                        import math
+                        blow_to = (wd + 180.0) % 360.0
+                        rec["wind_out"] = ws * math.cos(
+                            math.radians(blow_to - az))
+                    rec["temp_f"] = temp
+                if roof == "Retractable":
+                    share = float(closed_share.get(g.get("venue_id"), 0.5))
+                    rec["roof_closed"] = share
+                    if rec["wind_out"] == rec["wind_out"]:  # not NaN
+                        rec["wind_out"] *= (1.0 - share)
+                else:
+                    rec["roof_closed"] = 0.0
+        rec["hp_ump"] = fetch.get_gumbo_hp_umpire(g["gamePk"])
+        env[g["gamePk"]] = rec
+    return env
+
+
 def _model_stamp() -> str:
     h = hashlib.sha1()
     mdir = Path(__file__).resolve().parent.parent / "models"
@@ -185,6 +240,16 @@ def main(argv):
 
     bat_t, pit_t, slate_meta = build_targets(slate, history, uni)
     logger.warning("targets: %d batters, %d pitchers", len(bat_t), len(pit_t))
+
+    # Pregame environment (forecast weather, roof, HP ump when posted) onto
+    # both target frames; features.py coalesces these with historical actuals.
+    env = _game_environment(slate, history)
+    for frame in (bat_t, pit_t):
+        if frame.empty:
+            continue
+        for col in ("temp_f", "wind_out", "roof_closed", "hp_ump"):
+            frame[col] = frame["gamePk"].map(
+                lambda pk, c=col: (env.get(pk) or {}).get(c))
 
     bat_art = M.load_artifacts(list(M.BAT_TARGETS))
     pit_art = M.load_artifacts(list(M.PIT_TARGETS))

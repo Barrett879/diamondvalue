@@ -97,16 +97,35 @@ FEATURE_BLOCKS = {
                           "sp_whiff", "sp_fstrike"], "targets": set()},
     "arsenal_pit": {"cols": ["opp_lineup_xwhiff"], "targets": {"p_K", "p_H"}},
     "disc_pit": {"cols": ["p_whiff", "p_fstrike", "p_chase"], "targets": set()},
+    # Tier-2 candidate blocks (2026-07-11): game environment + HP umpire.
+    "weather_bat": {"cols": ["env_temp", "env_wind_out", "env_roof"],
+                    "targets": set()},
+    # 2025 confirmation: p_HR (-0.92% dev, biggest effect since sprint->SB),
+    # p_H, p_BB, p_K all replicated; p_ER failed for the THIRD time and is
+    # struck (its noise swallows even physics-backed signals).
+    "weather_pit": {"cols": ["env_temp", "env_wind_out", "env_roof"],
+                    "targets": {"p_H", "p_HR"}},
+    "ump_bat": {"cols": ["ump_k_delta", "ump_bb_delta"], "targets": set()},
+    "ump_pit": {"cols": ["ump_k_delta", "ump_bb_delta"],
+                "targets": {"p_BB", "p_K"}},
 }
 
 
 def target_feature_cols(target: str, all_cols: list[str]) -> list[str]:
-    """The feature list one target's model trains on (the block policy)."""
-    drop: set[str] = set()
+    """The feature list one target's model trains on (the block policy).
+
+    A gated column is kept iff AT LEAST ONE block containing it grants this
+    target. (An earlier any-block-can-veto version silently stripped columns
+    shared between per-role blocks -- weather_bat's empty set vetoed
+    weather_pit's grant -- which made a confirmation run train byte-identical
+    models. Grant-wins semantics fixes that.)
+    """
+    gated: dict[str, bool] = {}
     for block in FEATURE_BLOCKS.values():
-        if target not in block["targets"]:
-            drop.update(block["cols"])
-    return [c for c in all_cols if c not in drop]
+        granted = target in block["targets"]
+        for c in block["cols"]:
+            gated[c] = gated.get(c, False) or granted
+    return [c for c in all_cols if gated.get(c, True)]
 
 
 def _artifact_file(target: str):

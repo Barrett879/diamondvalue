@@ -152,3 +152,30 @@ pin down, so Barrett can audit later. Newest at the bottom.
   matchup ship nowhere; columns remain computed for future rounds.
 - Phase B (pitch-level TTO + fastball-velo trends) backfill running:
   build_pitchlevel_backfill.py, 3-day chunks, 25k-row cap asserted.
+
+## Tier-2: game environment + umpires (2026-07-11)
+
+- Zero-fetch training data: weather/wind/roof/HP-ump parsed from the 16,887
+  cached boxscores (build_weather_tables.py; 100% temp + ump coverage). The
+  boxscore wind string is already park-relative, so no azimuth math in
+  training. Venue geometry (lat/lon/elevation/azimuth/roofType) from the
+  Stats API venues endpoint.
+- POLICY-GATE BUG found and fixed during confirmation: target_feature_cols
+  used any-block-can-veto semantics, so weather_bat's empty target set
+  silently stripped env cols from weather_pit's granted targets -> a
+  confirmation run trained byte-identical models (0.00% everywhere).
+  Grant-wins semantics now (a col is kept iff ANY block containing it grants
+  the target). No earlier round shared cols across blocks, so shipped
+  policies were unaffected.
+- 2024 ablation + 2025 confirmation: weather SHIPPED for p_H and p_HR (HR
+  allowed dev -0.92%/MAE -0.44%, the largest confirmed effect since
+  sprint->SB; physics says temp/wind move HR and the data agrees). Umpire
+  deltas SHIPPED for p_BB (-0.14%) and p_K (-0.17%, its FOURTH stacking
+  gain). Batter-side weather and umpire blocks: noise, rejected. p_ER failed
+  a THIRD confirmation; ER is now the project's designated mirage -- its
+  noise swallows even physics-backed signals.
+- Inference plumbing: Open-Meteo hourly forecast (keyless) at venue coords
+  for the first-pitch UTC hour, wind projected onto the park's CF azimuth;
+  domes fixed at 72F/no wind; retractable roofs dampen wind by the venue's
+  historical closed share; HP ump via GUMBO once a game hits Pre-Game
+  (morning runs carry NaN, afternoon runs populate).

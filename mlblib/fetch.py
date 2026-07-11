@@ -366,6 +366,46 @@ def get_park_factors_raw(year: int, bat_side: str = "") -> list[dict] | None:
         return None
 
 
+def get_forecast(lat: float, lon: float, date_iso: str) -> dict | None:
+    """Hourly forecast for one venue-day from Open-Meteo (keyless, free for
+    non-commercial use). Returns {hour_iso_utc: (temp_f, wind_mph, wind_dir)}
+    or None on failure (features degrade to NaN, never block).
+    """
+    params = {
+        "latitude": lat, "longitude": lon,
+        "hourly": "temperature_2m,wind_speed_10m,wind_direction_10m",
+        "temperature_unit": "fahrenheit", "wind_speed_unit": "mph",
+        "timezone": "UTC",
+        "start_date": date_iso, "end_date": date_iso,
+    }
+    data = _http_json("https://api.open-meteo.com/v1/forecast", params,
+                      have_stale=True)  # bounded 3 tries; missing weather is OK
+    if not data or "hourly" not in data:
+        return None
+    h = data["hourly"]
+    out = {}
+    for t, temp, ws, wd in zip(h.get("time", []), h.get("temperature_2m", []),
+                               h.get("wind_speed_10m", []),
+                               h.get("wind_direction_10m", [])):
+        out[t] = (temp, ws, wd)
+    return out
+
+
+def get_gumbo_hp_umpire(game_pk: int) -> str | None:
+    """Home-plate umpire from the GUMBO live feed. Populates when the game
+    reaches Pre-Game status (~1-3h before first pitch); None before that.
+    """
+    data = _http_json(f"{STATS_BASE_11}/game/{game_pk}/feed/live", None,
+                      have_stale=True)
+    if not data:
+        return None
+    for o in (((data.get("liveData") or {}).get("boxscore") or {})
+              .get("officials") or []):
+        if (o.get("officialType") or "") == "Home Plate":
+            return (o.get("official") or {}).get("fullName")
+    return None
+
+
 def get_savant_csv(leaderboard: str, year: int) -> str | None:
     """Raw CSV text from a Savant leaderboard that supports csv=true
     (catcher-framing, catcher-throwing).

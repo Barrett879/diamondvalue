@@ -129,6 +129,11 @@ class Context:
         self._framing_all = self._concat(self.framing)
         self._throwing_all = self._concat(self.throwing)
         self._statcast_all = {k: self._concat(v) for k, v in self.statcast.items()}
+        # Per-game environment (parsed from cached boxscores) + venue geometry.
+        gw = cache.read_parquet_or_none(cache.dc_path("game_weather_v1.parquet"))
+        self.game_weather = gw if gw is not None else pd.DataFrame()
+        vn = cache.read_parquet_or_none(cache.dc_path("venues_v1.parquet"))
+        self.venues = vn if vn is not None else pd.DataFrame()
 
     def statcast_lookup(self, seasons, person_ids, which: str, col: str) -> np.ndarray:
         """Vectorized Y-1 lookup of one Statcast column for many players.
@@ -439,6 +444,10 @@ def compute_batter_features(history: pd.DataFrame, targets: pd.DataFrame | None 
     combined = combined.merge(plat, on=["personId", "season"], how="left")
     lg_plat = _league_platoon_rates(hist)
 
+    # Game environment: weather/roof (boxscore actuals or pipeline forecast)
+    # and the HP umpire's prior-season tendency deltas.
+    combined = _attach_environment(combined, ctx, history)
+
     out = combined[combined["_is_target"]].copy()
     feat = _assemble_batter_feature_cols(out, league, ctx, universe, lg_plat)
     return feat
@@ -508,6 +517,11 @@ def _assemble_batter_feature_cols(df, league, ctx, universe,
     f["opp_bp_bb"] = df.get("opp_bp_bb_rate", pd.Series(np.nan, index=df.index)).values
     f["opp_bp_hr"] = df.get("opp_bp_hr_rate", pd.Series(np.nan, index=df.index)).values
     f["opp_bp_er"] = df.get("opp_bp_er_out", pd.Series(np.nan, index=df.index)).values
+    # Tier-2 blocks: game environment (weather/roof) + HP umpire tendencies.
+    for src, name in (("env_temp", "env_temp"), ("env_wind_out", "env_wind_out"),
+                      ("env_roof", "env_roof"), ("ump_k_delta", "ump_k_delta"),
+                      ("ump_bb_delta", "ump_bb_delta")):
+        f[name] = pd.to_numeric(_series(df, src), errors="coerce").values
 
     # Park factors (Y-1, by batter hand) and opposing catcher metrics, vectorized.
     if ctx is not None:
@@ -600,6 +614,69 @@ def _platoon_split_table(hist: pd.DataFrame, query: pd.DataFrame) -> pd.DataFram
                                direction="backward", allow_exact_matches=False)
         out = merged
     return out.drop(columns=["_season", "_pid"])
+
+
+def _attach_environment(combined: pd.DataFrame, ctx, history: pd.DataFrame) -> pd.DataFrame:
+    """Merge per-game weather/roof/umpire onto rows, then map the HP umpire to
+    his PRIOR-SEASON cumulative K/BB tendency deltas (shrunk, 60-game ballast).
+
+    Training rows get actuals from the boxscore-parsed table by gamePk;
+    inference rows carry pipeline-provided temp_f / wind_out / roof_closed /
+    hp_ump columns (forecast + GUMBO officials), which win the coalesce.
+    """
+    if ctx is None or ctx.game_weather.empty:
+        return combined
+    gw = ctx.game_weather.rename(columns={
+        "temp_f": "_gw_temp", "wind_out": "_gw_wind",
+        "roof_closed": "_gw_roof", "hp_ump": "_gw_ump"})
+    combined = combined.merge(
+        gw[["gamePk", "_gw_temp", "_gw_wind", "_gw_roof", "_gw_ump"]],
+        on="gamePk", how="left")
+    for prov, gwcol, out in (("temp_f", "_gw_temp", "env_temp"),
+                             ("wind_out", "_gw_wind", "env_wind_out"),
+                             ("roof_closed", "_gw_roof", "env_roof")):
+        provided = pd.to_numeric(_series(combined, prov), errors="coerce")
+        combined[out] = provided.fillna(pd.to_numeric(combined[gwcol],
+                                                      errors="coerce")).values
+    ump_name = _series(combined, "hp_ump").fillna(combined["_gw_ump"])
+    combined["_ump"] = ump_name.values
+
+    # Umpire K/BB deltas from PRIOR seasons only. Per-game rates come from the
+    # batter rows of history (both sides combined).
+    bat = history[history["played"] & history["is_batter"]]
+    game = bat.groupby(["gamePk", "season"]).agg(
+        PA=("PA", "sum"), SO=("SO", "sum"), BB=("BB", "sum")).reset_index()
+    game = game[game["PA"] > 0]
+    game["k_rate"] = game["SO"] / game["PA"]
+    game["bb_rate"] = game["BB"] / game["PA"]
+    lg = game.groupby("season").agg(lg_k=("k_rate", "mean"),
+                                    lg_bb=("bb_rate", "mean")).reset_index()
+    game = game.merge(gw[["gamePk", "_gw_ump"]], on="gamePk", how="left")
+    game = game.merge(lg, on="season")
+    game["dk"] = game["k_rate"] - game["lg_k"]
+    game["dbb"] = game["bb_rate"] - game["lg_bb"]
+    per = (game.dropna(subset=["_gw_ump"])
+           .groupby(["_gw_ump", "season"])
+           .agg(n=("dk", "size"), dk_sum=("dk", "sum"), dbb_sum=("dbb", "sum"))
+           .reset_index().sort_values(["_gw_ump", "season"]))
+    for c in ("n", "dk_sum", "dbb_sum"):
+        per[f"cum_{c}"] = per.groupby("_gw_ump")[c].cumsum()
+    per["_season"] = per["season"].astype("float64")
+
+    query = combined[["_ump", "season"]].drop_duplicates().dropna(subset=["_ump"]).copy()
+    query["_season"] = pd.to_numeric(query["season"], errors="coerce").astype("float64")
+    merged = pd.merge_asof(
+        query.sort_values("_season"),
+        per[["_gw_ump", "_season", "cum_n", "cum_dk_sum", "cum_dbb_sum"]]
+        .rename(columns={"_gw_ump": "_ump"}).sort_values("_season"),
+        on="_season", by="_ump", direction="backward", allow_exact_matches=False)
+    K_BALLAST = 60.0
+    merged["ump_k_delta"] = merged["cum_dk_sum"].fillna(0) / (merged["cum_n"].fillna(0) + K_BALLAST)
+    merged["ump_bb_delta"] = merged["cum_dbb_sum"].fillna(0) / (merged["cum_n"].fillna(0) + K_BALLAST)
+    combined = combined.merge(
+        merged[["_ump", "season", "ump_k_delta", "ump_bb_delta"]],
+        on=["_ump", "season"], how="left")
+    return combined
 
 
 def _league_platoon_rates(hist: pd.DataFrame) -> pd.DataFrame:
@@ -772,6 +849,8 @@ def compute_pitcher_features(history: pd.DataFrame, targets: pd.DataFrame | None
                    .rename(columns={"oppStarterId": "personId"}))
             combined = combined.merge(agg, on=["gamePk", "personId"], how="left")
 
+    combined = _attach_environment(combined, ctx, history)
+
     out = combined[combined["_is_target"]].copy()
     return _assemble_pitcher_feature_cols(out, league, ctx, universe)
 
@@ -833,6 +912,11 @@ def _assemble_pitcher_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
         provided = pd.to_numeric(_series(df, "opp_lineup_xwhiff"), errors="coerce")
         hist_mu = pd.to_numeric(_series(df, "opp_lineup_xwhiff_hist"), errors="coerce")
         f["opp_lineup_xwhiff"] = provided.fillna(hist_mu).values
+    # Tier-2 blocks: game environment + HP umpire tendencies.
+    for src, name in (("env_temp", "env_temp"), ("env_wind_out", "env_wind_out"),
+                      ("env_roof", "env_roof"), ("ump_k_delta", "ump_k_delta"),
+                      ("ump_bb_delta", "ump_bb_delta")):
+        f[name] = pd.to_numeric(_series(df, src), errors="coerce").values
 
     if universe is not None:
         bmap = dict(zip(universe["personId"], universe["birthDate"]))

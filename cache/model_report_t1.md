@@ -21,11 +21,11 @@ Train seasons [2021, 2022, 2023], test season 2025. Every stat is evaluated at t
 - `p_outs` [PASS]: beats season-average and Marcel baselines (model MAE 2.809 vs season-avg 2.971, Marcel 3.047).
 - `p_BF` [PASS]: beats season-average and Marcel baselines (model MAE 2.735 vs season-avg 2.908, Marcel 3.093).
 - `p_pitches` [PASS]: beats season-average and Marcel baselines (model MAE 9.522 vs season-avg 9.995, Marcel 10.741).
-- `p_K` [PASS]: beats season-average and Marcel baselines (model MAE 1.772 vs season-avg 1.917, Marcel 1.889).
-- `p_BB` [PASS]: beats season-average and Marcel baselines (model MAE 1.022 vs season-avg 1.083, Marcel 1.027).
-- `p_H` [PASS]: beats season-average and Marcel baselines (model MAE 1.737 vs season-avg 1.841, Marcel 1.765).
-- `p_HR` [PASS]: beats season-average and Marcel baselines (model MAE 0.694 vs season-avg 0.725, Marcel 0.700).
-- `p_ER` [PASS]: beats season-average and Marcel baselines (model MAE 1.591 vs season-avg 1.653, Marcel 1.599).
+- `p_K` [PASS]: beats season-average and Marcel baselines (model MAE 1.773 vs season-avg 1.917, Marcel 1.889).
+- `p_BB` [PASS]: beats season-average and Marcel baselines (model MAE 1.021 vs season-avg 1.083, Marcel 1.027).
+- `p_H` [PASS]: beats season-average and Marcel baselines (model MAE 1.738 vs season-avg 1.841, Marcel 1.765).
+- `p_HR` [PASS]: beats season-average and Marcel baselines (model MAE 0.697 vs season-avg 0.725, Marcel 0.700).
+- `p_ER` [PASS]: beats season-average and Marcel baselines (model MAE 1.588 vs season-avg 1.653, Marcel 1.599).
 
 ## Batting detail
 
@@ -50,8 +50,8 @@ Train seasons [2021, 2022, 2023], test season 2025. Every stat is evaluated at t
 | p_outs    | 4860 |      2.8086 |   3.0989 |   2.9713 |   3.0466 |      1.0175 |   1.1682 |   1.2238 |
 | p_BF      | 4860 |      2.7354 |   3.1753 |   2.908  |   3.0933 |      0.755  |   0.8828 |   1.016  |
 | p_pitches | 4860 |      9.5223 |  11.5232 |   9.9953 |  10.7408 |      2.5354 |   2.9536 |   3.4844 |
-| p_K       | 4860 |      1.7716 |   1.9791 |   1.9172 |   1.8891 |      1.1496 |   1.506  |   1.2576 |
-| p_BB      | 4860 |      1.0217 |   1.0599 |   1.0827 |   1.0274 |      1.1176 |   2.3634 |   1.1254 |
-| p_H       | 4860 |      1.7372 |   1.7657 |   1.8415 |   1.7648 |      1.011  |   1.5274 |   1.0713 |
-| p_HR      | 4860 |      0.694  |   0.7088 |   0.7246 |   0.7003 |      1.1072 |   2.8564 |   1.1203 |
-| p_ER      | 4860 |      1.5905 |   1.6142 |   1.653  |   1.5991 |      1.774  |   3.774  |   1.7957 |
+| p_K       | 4860 |      1.7733 |   1.9791 |   1.9172 |   1.8891 |      1.1515 |   1.506  |   1.2576 |
+| p_BB      | 4860 |      1.0214 |   1.0599 |   1.0827 |   1.0274 |      1.1192 |   2.3634 |   1.1254 |
+| p_H       | 4860 |      1.7377 |   1.7657 |   1.8415 |   1.7648 |      1.0121 |   1.5274 |   1.0713 |
+| p_HR      | 4860 |      0.6971 |   0.7088 |   0.7246 |   0.7003 |      1.1175 |   2.8564 |   1.1203 |
+| p_ER      | 4860 |      1.5883 |   1.6142 |   1.653  |   1.5991 |      1.7732 |   3.774  |   1.7957 |
