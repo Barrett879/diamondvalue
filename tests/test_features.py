@@ -113,3 +113,23 @@ def test_realdata_no_leakage(_):
         exp_hr = prior["HR"].sum()
         assert trow["b_std_PA"] == exp_pa, f"PA leak for {pid} {trow['gamePk']}"
         assert trow["b_std_HR"] == exp_hr, f"HR leak for {pid} {trow['gamePk']}"
+
+
+def test_platoon_split_uses_prior_seasons_only():
+    hist = _synthetic_history()
+    # Give player 1 distinct 2020 splits: faced L starter in game 900 (1 HR in
+    # 4 PA), R starter in game 901 (1 HR in 4 PA is too symmetric, so adjust:
+    # make the vs-L game 4 HR in 4 PA by editing counts).
+    hist.loc[hist.gamePk == 900, "oppStarterHand"] = "L"
+    hist.loc[hist.gamePk == 900, "HR"] = 4
+    hist.loc[hist.gamePk == 901, "oppStarterHand"] = "R"
+    hist.loc[hist.gamePk == 901, "HR"] = 0
+    query = pd.DataFrame({"personId": [1, 1], "season": [2020, 2021]})
+    tbl = F._platoon_split_table(hist[hist.is_batter & hist.played], query)
+    r2021 = tbl[tbl.season == 2021].iloc[0]
+    # 2021 sees 2020: 4 PA vs L with 4 HR; 4 PA vs R with 0 HR.
+    assert r2021["vL_PA"] == 4 and r2021["vL_HR"] == 4
+    assert r2021["vR_PA"] == 4 and r2021["vR_HR"] == 0
+    r2020 = tbl[tbl.season == 2020].iloc[0]
+    # 2020 has no prior season: cums are NaN (assembly falls back to league).
+    assert pd.isna(r2020["vL_PA"]) and pd.isna(r2020["vR_PA"])

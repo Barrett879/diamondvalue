@@ -329,22 +329,34 @@ def compute_batter_features(history: pd.DataFrame, targets: pd.DataFrame | None 
                                  HITTER_BALLAST_PA, league, seasons=tgt_seasons)
     combined = combined.merge(marcel, on=["personId", "season"], how="left")
 
-    # Opposing starter as-of quality (his shifted season-to-date rates).
+    # Opposing starter as-of quality (season-to-date + last-30 form).
     opp = _pitcher_asof_table(history)
     combined = _join_pitcher_asof(combined, opp, id_col="oppStarterId", prefix="opp_")
 
+    # Own-team offense through the prior day (drives R/RBI context).
+    team = _team_asof_table(history)
+    combined = _join_team_asof(combined, team, id_col="teamId", prefix="own_")
+
+    # Platoon split priors: the batter's regressed component rates vs the
+    # starter's hand, from PRIOR seasons only.
+    plat = _platoon_split_table(hist, combined[["personId", "season"]])
+    combined = combined.merge(plat, on=["personId", "season"], how="left")
+    lg_plat = _league_platoon_rates(hist)
+
     out = combined[combined["_is_target"]].copy()
-    feat = _assemble_batter_feature_cols(out, league, ctx, universe)
+    feat = _assemble_batter_feature_cols(out, league, ctx, universe, lg_plat)
     return feat
 
 
-def _assemble_batter_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
+def _assemble_batter_feature_cols(df, league, ctx, universe,
+                                  lg_plat: pd.DataFrame | None = None) -> pd.DataFrame:
     f = pd.DataFrame(index=df.index)
     f["personId"] = df["personId"].values
     f["gamePk"] = df["gamePk"].values
     f["season"] = df["season"].values
     f["month"] = pd.to_datetime(df["officialDate"], errors="coerce").dt.month.values
     f["is_home"] = df["isHome"].astype(float).values
+    f["is_night"] = _series(df, "dayNight").map({"day": 0.0, "night": 1.0}).values
     f["slot"] = df["slot"].astype(float).values
     f["rest_days"] = df["b_rest_days"].clip(upper=15).values
     f["std_G"] = df["b_std_G"].values
@@ -360,15 +372,38 @@ def _assemble_batter_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
     f["marcel_SO"] = df["marcel_SO"].values
     f["marcel_BB"] = df["marcel_BB"].values
 
-    # Platoon: batter prior rate vs the starter's hand, from history (added by
-    # caller pipeline as opp hand columns); computed inline here as split diff.
+    # Platoon advantage flag plus the batter's own regressed component rates vs
+    # the starter's hand (prior seasons only, ballast PLATOON_K_PA of the league
+    # rate for his batSide x hand cell).
     f["plat_same"] = _platoon_flag(df).values
+    if lg_plat is not None:
+        hand = _series(df, "oppStarterHand").reset_index(drop=True)
+        bs = _series(df, "batSide").reset_index(drop=True)
+        lg_key = pd.DataFrame({"batSide": bs.values, "oppStarterHand": hand.values})
+        lg = lg_key.merge(lg_plat, on=["batSide", "oppStarterHand"], how="left")
+        hand_known = hand.isin(["L", "R"]).values
+        pa_vs = np.where(hand.values == "L", _series(df, "vL_PA").values,
+                         np.where(hand.values == "R", _series(df, "vR_PA").values, np.nan))
+        pa_vs = np.where(hand_known, np.nan_to_num(pa_vs, nan=0.0), np.nan)
+        for c in _PLAT_COMPONENTS:
+            cnt = np.where(hand.values == "L", _series(df, f"vL_{c}").values,
+                           np.where(hand.values == "R", _series(df, f"vR_{c}").values, np.nan))
+            cnt = np.where(hand_known, np.nan_to_num(cnt, nan=0.0), np.nan)
+            lg_rate = lg[f"lg_{c}"].values
+            f[f"plat_{c}"] = (cnt + PLATOON_K_PA * lg_rate) / (pa_vs + PLATOON_K_PA)
 
-    # Opposing starter quality.
+    # Opposing starter quality: season-to-date and last-30-appearance form.
     f["opp_sp_k_rate"] = df.get("opp_p_K_rate", pd.Series(np.nan, index=df.index)).values
     f["opp_sp_bb_rate"] = df.get("opp_p_BB_rate", pd.Series(np.nan, index=df.index)).values
     f["opp_sp_hr_rate"] = df.get("opp_p_HR_rate", pd.Series(np.nan, index=df.index)).values
+    f["opp_sp_k_r30"] = df.get("opp_p_K_rate_r30", pd.Series(np.nan, index=df.index)).values
+    f["opp_sp_bb_r30"] = df.get("opp_p_BB_rate_r30", pd.Series(np.nan, index=df.index)).values
+    f["opp_sp_hr_r30"] = df.get("opp_p_HR_rate_r30", pd.Series(np.nan, index=df.index)).values
     f["opp_sp_hand"] = _hand_code(df.get("oppStarterHand")).values
+
+    # Own-team offense through the prior day.
+    f["own_team_r_pa"] = df.get("own_team_r_pa", pd.Series(np.nan, index=df.index)).values
+    f["own_team_obp"] = df.get("own_team_obp", pd.Series(np.nan, index=df.index)).values
 
     # Park factors (Y-1, by batter hand) and opposing catcher metrics, vectorized.
     if ctx is not None:
@@ -398,22 +433,72 @@ def _assemble_batter_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
     return f
 
 
+# ── Platoon split priors (per-batter rates vs L and vs R starters) ───────────
+PLATOON_K_PA = 200.0  # league-ballast PA for regressing a batter's vs-hand rates
+_PLAT_COMPONENTS = ["H", "HR", "BB", "SO"]
+
+
+def _platoon_split_table(hist: pd.DataFrame, query: pd.DataFrame) -> pd.DataFrame:
+    """Per (personId, season): the batter's CUMULATIVE prior-season counts vs L
+    and vs R starters (vL_PA, vL_H, ... vR_SO), strictly from seasons before the
+    target season. A game counts toward the hand of that day's opposing STARTER
+    (a proxy for per-PA pitcher hand, which the boxscore backfill lacks; noted
+    in docs/decisions.md).
+
+    query: unique (personId, season) pairs to produce rows for (may include
+    seasons absent from hist, e.g. the current season at inference).
+    """
+    sub = hist[hist["oppStarterHand"].isin(["L", "R"])]
+    agg = sub.groupby(["personId", "season", "oppStarterHand"]).agg(
+        PA=("PA", "sum"), H=("H", "sum"), HR=("HR", "sum"),
+        BB=("BB", "sum"), SO=("SO", "sum")).reset_index()
+
+    out = query[["personId", "season"]].drop_duplicates().copy()
+    out["_season"] = pd.to_numeric(out["season"], errors="coerce").astype("float64")
+    out["_pid"] = pd.to_numeric(out["personId"], errors="coerce").astype("float64")
+    for hand, tag in (("L", "vL"), ("R", "vR")):
+        a = agg[agg["oppStarterHand"] == hand].sort_values(["personId", "season"]).copy()
+        for c in ["PA"] + _PLAT_COMPONENTS:
+            a[f"{tag}_{c}"] = a.groupby("personId")[c].cumsum()
+        a["_season"] = pd.to_numeric(a["season"], errors="coerce").astype("float64")
+        a["_pid"] = pd.to_numeric(a["personId"], errors="coerce").astype("float64")
+        cols = [f"{tag}_{c}" for c in ["PA"] + _PLAT_COMPONENTS]
+        left = out.sort_values("_season")
+        right = a[["_pid", "_season"] + cols].sort_values("_season")
+        # Latest prior season strictly BEFORE the target season (no exact match
+        # = the target season's own games never leak into its prior).
+        merged = pd.merge_asof(left, right, on="_season", by="_pid",
+                               direction="backward", allow_exact_matches=False)
+        out = merged
+    return out.drop(columns=["_season", "_pid"])
+
+
+def _league_platoon_rates(hist: pd.DataFrame) -> pd.DataFrame:
+    """League component rates by (batSide, starter hand) — the shrink target."""
+    sub = hist[hist["oppStarterHand"].isin(["L", "R"]) & hist["batSide"].isin(["L", "R", "S"])]
+    g = sub.groupby(["batSide", "oppStarterHand"]).agg(
+        PA=("PA", "sum"), **{c: (c, "sum") for c in _PLAT_COMPONENTS}).reset_index()
+    for c in _PLAT_COMPONENTS:
+        g[f"lg_{c}"] = g[c] / g["PA"].replace(0, np.nan)
+    return g[["batSide", "oppStarterHand"] + [f"lg_{c}" for c in _PLAT_COMPONENTS]]
+
+
 # ── Pitcher as-of helpers (used for opposing-starter features) ───────────────
 def _pitcher_asof_table(history: pd.DataFrame) -> pd.DataFrame:
-    """Per pitcher-appearance shifted season-to-date rate table keyed for as-of
-    lookup by (personId, gameDate).
+    """Per pitcher-appearance shifted rate table keyed for as-of lookup by
+    (personId, gameDate): season-to-date rates plus last-30-appearance form.
     """
     p = history[history["played"] & history["is_pitcher"]].copy()
     p = p.sort_values(["personId", "gameDate", "gameNumber"]).reset_index(drop=True)
     p = _add_asof_aggregates(p, ["p_BF", "p_K", "p_BB", "p_H", "p_HR", "p_ER"], prefix="p_")
     bf = p["p_std_p_BF"].replace(0, np.nan)
-    tbl = {"p_K": p["p_std_p_K"], "p_BB": p["p_std_p_BB"], "p_H": p["p_std_p_H"],
-           "p_HR": p["p_std_p_HR"]}
+    bf30 = p["p_r30_p_BF"].replace(0, np.nan)
     out = pd.DataFrame({
         "personId": p["personId"], "gameDate": p["gameDate"], "gameNumber": p["gameNumber"],
     })
-    for c, num in tbl.items():
-        out[f"{c}_rate"] = (num / bf).values
+    for c in ("p_K", "p_BB", "p_H", "p_HR"):
+        out[f"{c}_rate"] = (p[f"p_std_{c}"] / bf).values
+        out[f"{c}_rate_r30"] = (p[f"p_r30_{c}"] / bf30).values
     return out.sort_values(["gameDate", "personId"]).reset_index(drop=True)
 
 
@@ -512,6 +597,9 @@ def _assemble_pitcher_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
     f["season"] = df["season"].values
     f["month"] = pd.to_datetime(df["officialDate"], errors="coerce").dt.month.values
     f["is_home"] = df["isHome"].astype(float).values
+    # NOTE: is_night was tried for pitchers and REVERTED: it nudged p_outs/p_BF/
+    # p_K MAE 0.1-0.3% WORSE on the 2025 walk-forward (noise, no signal). It
+    # stays in the batter features, where the same test showed small gains.
     f["rest_days"] = df["p_rest_days"].clip(upper=30).values
     f["std_G"] = df["p_std_G"].values
     f["hand"] = _hand_code(_series(df, "pitchHand")).values
@@ -564,7 +652,7 @@ def _join_pitcher_asof(combined, opp_table, id_col, prefix) -> pd.DataFrame:
     right["_gd"] = pd.to_datetime(right["gameDate"], errors="coerce")
     right["_by"] = pd.to_numeric(right["personId"], errors="coerce").astype("float64")
     right = right.dropna(subset=["_by", "_gd"]).sort_values("_gd")
-    rate_cols = [c for c in right.columns if c.endswith("_rate")]
+    rate_cols = [c for c in right.columns if c.endswith("_rate") or c.endswith("_rate_r30")]
     merged = pd.merge_asof(
         left_sorted, right[["_by", "_gd"] + rate_cols],
         on="_gd", by="_by",

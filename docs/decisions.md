@@ -57,6 +57,27 @@ pin down, so Barrett can audit later. Newest at the bottom.
 - Shipped models train on 2021-2025 (all data). validate_models.py trains a
   separate 2021-2023 model and tests on 2025 for the honest report.
 
+## Accuracy round 2 (2026-07-10, post-launch)
+
+- Tested four feature additions on the 2025 walk-forward (ship only what wins):
+  1. SHIPPED (batters): per-batter regressed platoon split rates vs the
+     starter's hand (plat_H/HR/BB/SO), prior seasons only, ballast 200 PA of
+     the league rate by batSide x hand. A game's PA count toward the hand of
+     that day's opposing STARTER (proxy; boxscores lack per-PA pitcher hand).
+  2. SHIPPED (batters): own-team offense through the prior day (own_team_r_pa,
+     own_team_obp). This is what flipped R and RBI from marginal to PASSING
+     the season-average baseline.
+  3. SHIPPED (batters): opposing starter last-30-appearance form rates
+     (opp_sp_k/bb/hr_r30) alongside season-to-date.
+  4. SHIPPED (batters) / REVERTED (pitchers): is_night. Small gain for
+     batters; made pitcher p_outs/p_BF/p_K 0.1-0.3% WORSE, so removed there.
+- Net effect: batting MAE improved on 10/11 stats (0.1-0.8%), R and RBI now
+  beat the season-average baseline; pitching unchanged (revert restored it
+  exactly). Consistent with the variance ceiling: real but small gains.
+- Not attempted this round (future levers): Statcast quality-of-contact
+  enrichment (biggest known lever, heavy pulls), weather, umpire tendencies,
+  proper per-PA platoon data, opposing bullpen quality.
+
 ## Phase 4 (daily pipeline)
 
 - INFERENCE HISTORY FILTER (important): build_daily_predictions filters history
