@@ -13,17 +13,19 @@ from . import cache
 from . import model as M
 from .theme import SENTINEL
 
-# Canonical batter display columns: (prediction column, header, decimals).
+# Canonical display columns: (prediction column, header, decimals). Barrett's
+# 2026-07-11 column decision: show exactly his 18 stats and hide the rest
+# (AVG/OBP/SLG/OPS and HR-allowed hidden; 1B and Pitches added). The hidden
+# derived rates are still computed in the predictions parquet.
 BAT_DISPLAY = [
     ("slot", "Slot", 0), ("fullName", "Player", None), ("PA", "PA", 1),
-    ("H", "H", 2), ("b2", "2B", 2), ("b3", "3B", 2), ("HR", "HR", 2),
-    ("TB", "TB", 2), ("R", "R", 2), ("RBI", "RBI", 2), ("BB", "BB", 2),
-    ("SO", "SO", 2), ("SB", "SB", 2), ("AVG", "AVG", 3), ("OBP", "OBP", 3),
-    ("SLG", "SLG", 3), ("OPS", "OPS", 3),
+    ("H", "H", 2), ("b1", "1B", 2), ("b2", "2B", 2), ("b3", "3B", 2),
+    ("HR", "HR", 2), ("TB", "TB", 2), ("R", "R", 2), ("RBI", "RBI", 2),
+    ("BB", "BB", 2), ("SO", "SO", 2), ("SB", "SB", 2),
 ]
 PIT_DISPLAY = [
-    ("fullName", "Pitcher", None), ("IP", "IP", 1), ("K", "K", 2),
-    ("BB", "BB", 2), ("H", "H", 2), ("HR", "HR", 2), ("ER", "ER", 2),
+    ("fullName", "Pitcher", None), ("IP", "IP", 1), ("Pitches", "Pitches", 0),
+    ("K", "K", 2), ("BB", "BB", 2), ("H", "H", 2), ("ER", "ER", 2),
 ]
 
 

@@ -43,7 +43,8 @@ PIT_STAB_K = {"p_K": 90.0, "p_BB": 170.0, "p_HR": 250.0, "p_H": 250.0}
 BAT_COUNTS = ["PA", "AB", "H", "b1", "b2", "b3", "HR", "BB", "HBP", "SO",
               "R", "RBI", "SB", "TB", "SF"]
 BAT_RATE_COMPONENTS = ["b1", "b2", "b3", "HR", "BB", "HBP", "SO"]  # per PA
-PIT_COUNTS = ["p_outs", "p_BF", "p_K", "p_BB", "p_H", "p_HR", "p_ER", "p_R"]
+PIT_COUNTS = ["p_outs", "p_BF", "p_K", "p_BB", "p_H", "p_HR", "p_ER", "p_R",
+              "p_pitches"]
 PIT_RATE_COMPONENTS = ["p_K", "p_BB", "p_H", "p_HR"]  # per BF
 
 

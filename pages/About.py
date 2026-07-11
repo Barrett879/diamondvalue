@@ -42,8 +42,9 @@ Each stat has its own gradient-boosted model (scikit-learn
 HistGradientBoostingRegressor, Poisson loss). Rather than predict a counting
 stat directly, the models predict opportunities (plate appearances for hitters,
 batters faced for pitchers) and per-opportunity rates, then multiply. Composite
-numbers like total bases, OBP, SLG, and OPS are derived from the predicted
-components so they always stay internally consistent.
+numbers like hits and total bases are derived from the predicted singles,
+doubles, triples, and home runs so the table always stays internally
+consistent.
 
 Features are strictly point-in-time: everything a model sees was knowable before
 first pitch. They include regressed multi-season talent priors (Marcel style),

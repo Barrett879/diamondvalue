@@ -39,6 +39,7 @@ BAT_TARGETS = {
 PIT_TARGETS = {
     "p_outs": {"kind": "opp", "count": "p_outs"},
     "p_BF": {"kind": "opp", "count": "p_BF"},
+    "p_pitches": {"kind": "opp", "count": "p_pitches"},
     "p_K": {"kind": "rate", "count": "p_K", "denom": "p_BF"},
     "p_BB": {"kind": "rate", "count": "p_BB", "denom": "p_BF"},
     "p_H": {"kind": "rate", "count": "p_H", "denom": "p_BF"},
@@ -159,6 +160,7 @@ def predict_pitchers(feat: pd.DataFrame, artifacts: dict) -> pd.DataFrame:
     bf = _safe_predict("p_BF", artifacts, feat)
     out["IP"] = outs / 3.0 if outs is not None else np.nan
     out["BF"] = bf
+    out["Pitches"] = _safe_predict("p_pitches", artifacts, feat)
     for c in ["p_K", "p_BB", "p_H", "p_HR"]:
         rate = _safe_predict(c, artifacts, feat)
         out[c.replace("p_", "")] = rate * bf if (rate is not None and bf is not None) else np.nan

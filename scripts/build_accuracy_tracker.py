@@ -23,10 +23,12 @@ from mlblib.cache import logger  # noqa: E402
 # actual scale converts the gamelog column onto the prediction's units, e.g. the
 # IP prediction is in innings while the gamelog stores outs (IP = outs / 3).
 BAT_STATS = [("PA", "PA", "PA", 1.0), ("H", "H", "H", 1.0), ("HR", "HR", "HR", 1.0),
+             ("1B", "b1", "b1", 1.0), ("2B", "b2", "b2", 1.0), ("3B", "b3", "b3", 1.0),
              ("SO", "SO", "SO", 1.0), ("BB", "BB", "BB", 1.0), ("TB", "TB", "TB", 1.0),
              ("R", "R", "R", 1.0), ("RBI", "RBI", "RBI", 1.0), ("SB", "SB", "SB", 1.0)]
 PIT_STATS = [("K", "K", "p_K", 1.0), ("BB", "BB", "p_BB", 1.0), ("H", "H", "p_H", 1.0),
-             ("ER", "ER", "p_ER", 1.0), ("IP", "IP", "p_outs", 1.0 / 3.0)]
+             ("ER", "ER", "p_ER", 1.0), ("IP", "IP", "p_outs", 1.0 / 3.0),
+             ("Pitches", "Pitches", "p_pitches", 1.0)]
 
 
 def _season_todate_mean(logs, role):

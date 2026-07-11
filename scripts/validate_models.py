@@ -49,6 +49,7 @@ BAT_DISPLAY = {
 PIT_DISPLAY = {
     "p_outs": ("opp", "p_outs"),
     "p_BF": ("opp", "p_BF"),
+    "p_pitches": ("opp", "p_pitches"),
     "p_K": ("rate", {"p_K": 1}),
     "p_BB": ("rate", {"p_BB": 1}),
     "p_H": ("rate", {"p_H": 1}),
