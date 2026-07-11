@@ -118,6 +118,42 @@ def build_season(season: int) -> None:
                    season, len(tto), len(velo))
 
 
+def update_current_velo(season: int, days: int = 8) -> None:
+    """Rolling in-season update of fbvelo_{season}: fetch the last `days` days
+    (2-3 chunks), reduce, and merge into the committed parquet. Keeps the
+    velocity-trend features live for current-season inference without the
+    full-season chunk cache (CI-friendly: a handful of fetches per run).
+    """
+    import datetime as _dt
+
+    end = _dt.date.today()
+    start = end - _dt.timedelta(days=days)
+    parts = []
+    cur = start
+    while cur <= end:
+        d1 = min(cur + _dt.timedelta(days=CHUNK_DAYS - 1), end)
+        df = _fetch_chunk(cur, d1)
+        time.sleep(2.0)
+        if df is not None and not df.empty:
+            parts.append(_reduce(df))
+        cur += _dt.timedelta(days=CHUNK_DAYS)
+    if not parts:
+        logger.warning("velo update %s: nothing fetched", season)
+        return
+    allp = pd.concat(parts, ignore_index=True)
+    fb = allp[allp["is_fb"] & allp["release_speed"].notna()]
+    new = (fb.groupby(["pitcher", "game_pk", "game_date"])
+           .agg(ff_velo=("release_speed", "mean"), n_ff=("release_speed", "size"))
+           .reset_index().rename(columns={"pitcher": "player_id"}))
+    new["season"] = season
+    path = cache.dc_path(f"fbvelo_{season}_v1.parquet")
+    old = cache.read_parquet_or_none(path)
+    combined = (pd.concat([old, new], ignore_index=True) if old is not None else new)
+    combined = combined.drop_duplicates(subset=["player_id", "game_pk"], keep="last")
+    cache.atomic_to_parquet(combined, path)
+    logger.warning("velo update %s: +%d starts (total %d)", season, len(new), len(combined))
+
+
 def main(argv: list[str]) -> None:
     seasons = ALL_SEASONS if (not argv or argv[0] == "all") else [int(a) for a in argv]
     for s in seasons:

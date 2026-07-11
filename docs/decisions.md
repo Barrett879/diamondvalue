@@ -210,3 +210,23 @@ pin down, so Barrett can audit later. Newest at the bottom.
   validator-identical history. Lesson: a confirmation harness must match the
   production configuration EXACTLY or its verdicts are about a different
   model.
+
+## Tier-4: pitch-level TTO, velocity fatigue, pen fatigue (2026-07-11)
+
+- The pitch-level backfill (6 seasons, ~4M pitches reduced to two small
+  tables) paid for itself: the tier-4 JOINT confirmation on 2025 via the
+  real validator produced the largest confirmed gains in project history.
+  SHIPPED: velocity fatigue trend (velo_r3/velo_trend, shifted as-of from
+  per-start fastball velo) for p_outs/p_BF/p_pitches/p_K/p_H; TTO decay
+  profiles (Y-1) for p_pitches/p_K/p_H; own-pen day-of fatigue for
+  p_outs/p_BF/p_pitches; opposing-pen fatigue for PA.
+  Headline numbers: p_pitches dev -2.09%/MAE -1.35% (9.52 -> 9.39), p_BF
+  -1.75%, p_H -1.26%, p_K -0.22% (SIXTH stacked gain).
+- STRUCK at joint confirmation: p_HR (+0.35%) and p_ER (+0.51%; ER is now
+  0-for-5 and permanently suspect).
+- In-season upkeep: update_current_velo() fetches the last ~8 days of
+  pitch data (2-3 chunks) each daily run and merges into fbvelo_{year}, so
+  the velocity features stay live; bootstrapped 2026 with 45 days (4,920
+  starts). TTO uses Y-1 only, so no in-season upkeep needed.
+- Deferred (needs a re-pull keeping fielder_2/plate coords): catcher
+  framing v2, batter-vs-velocity splits, catcher-throwing vs SB.

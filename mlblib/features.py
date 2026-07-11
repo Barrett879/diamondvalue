@@ -129,6 +129,33 @@ class Context:
         self._framing_all = self._concat(self.framing)
         self._throwing_all = self._concat(self.throwing)
         self._statcast_all = {k: self._concat(v) for k, v in self.statcast.items()}
+        # Times-through-order profiles (Y-1, from the pitch-level backfill):
+        # wide per (player_id, season) with K rate first time through, the
+        # 1st->3rd decay, the share of batters faced a third time (leash
+        # proxy), and pitches per PA.
+        tto_frames = []
+        for y in years:
+            t = cache.read_parquet_or_none(cache.dc_path(f"tto_pit_{y}_v1.parquet"))
+            if t is not None:
+                tto_frames.append(t)
+        if tto_frames:
+            tl = pd.concat(tto_frames, ignore_index=True)
+            w = tl.pivot_table(index=["player_id", "season"], columns="tto",
+                               values=["pa", "so", "pitches"], aggfunc="sum")
+            w.columns = [f"{a}{b}" for a, b in w.columns]
+            w = w.reset_index()
+            pa1 = w.get("pa1", pd.Series(np.nan, index=w.index)).replace(0, np.nan)
+            pa3 = w.get("pa3", pd.Series(np.nan, index=w.index)).replace(0, np.nan)
+            pa_tot = w.filter(like="pa").sum(axis=1).replace(0, np.nan)
+            w["tto_k1"] = w.get("so1", 0) / pa1
+            w["tto_decay"] = w["tto_k1"] - (w.get("so3", 0) / pa3)
+            w["tto3_share"] = pa3 / pa_tot
+            w["tto_ppa"] = w.filter(like="pitches").sum(axis=1) / pa_tot
+            self._tto_wide = w[["player_id", "season", "tto_k1", "tto_decay",
+                                "tto3_share", "tto_ppa"]]
+        else:
+            self._tto_wide = pd.DataFrame()
+
         # Per-game environment (parsed from cached boxscores) + venue geometry.
         gw = cache.read_parquet_or_none(cache.dc_path("game_weather_v1.parquet"))
         self.game_weather = gw if gw is not None else pd.DataFrame()
@@ -158,6 +185,23 @@ class Context:
         ref = ref.drop_duplicates(subset=["season", "player_id"])
         merged = key.merge(ref, on=["season", "player_id"], how="left").sort_values("_i")
         return pd.to_numeric(merged["_val"], errors="coerce").values
+
+    def tto_lookup(self, seasons, person_ids, col: str) -> np.ndarray:
+        """Vectorized Y-1 lookup into the TTO wide table."""
+        n = len(seasons)
+        if self._tto_wide.empty or col not in self._tto_wide.columns:
+            return np.full(n, np.nan)
+        years = sorted(self._tto_wide["season"].unique())
+        pyr = {s: max((y for y in years if y < s), default=None)
+               for s in pd.unique(seasons)}
+        key = pd.DataFrame({
+            "_i": np.arange(n),
+            "season": [pyr.get(s) for s in seasons],
+            "player_id": pd.to_numeric(pd.Series(person_ids), errors="coerce"),
+        })
+        ref = self._tto_wide[["season", "player_id", col]].rename(columns={col: "_v"})
+        merged = key.merge(ref, on=["season", "player_id"], how="left").sort_values("_i")
+        return pd.to_numeric(merged["_v"], errors="coerce").values
 
     def arsenal_matchup(self, seasons, batter_ids, pitcher_ids) -> np.ndarray:
         """Expected-whiff matchup: sum over the pitcher's Y-1 pitch mix of
@@ -448,6 +492,10 @@ def compute_batter_features(history: pd.DataFrame, targets: pd.DataFrame | None 
     # and the HP umpire's prior-season tendency deltas.
     combined = _attach_environment(combined, ctx, history)
 
+    # Opposing bullpen day-of fatigue (tier 4).
+    combined = _join_pen_fatigue(combined, _pen_fatigue_table(history),
+                                 id_col="oppTeamId", prefix="opp_")
+
     out = combined[combined["_is_target"]].copy()
     feat = _assemble_batter_feature_cols(out, league, ctx, universe, lg_plat)
     return feat
@@ -530,6 +578,9 @@ def _assemble_batter_feature_cols(df, league, ctx, universe,
                       ("env_roof", "env_roof"), ("ump_k_delta", "ump_k_delta"),
                       ("ump_bb_delta", "ump_bb_delta")):
         f[name] = pd.to_numeric(_series(df, src), errors="coerce").values
+    # Tier-4 block: opposing bullpen day-of fatigue.
+    f["opp_pen_yday"] = pd.to_numeric(_series(df, "opp_pen_yday"), errors="coerce").values
+    f["opp_pen_2day"] = pd.to_numeric(_series(df, "opp_pen_2day"), errors="coerce").values
 
     # Park factors (Y-1, by batter hand) and opposing catcher metrics, vectorized.
     if ctx is not None:
@@ -684,6 +735,88 @@ def _attach_environment(combined: pd.DataFrame, ctx, history: pd.DataFrame) -> p
     combined = combined.merge(
         merged[["_ump", "season", "ump_k_delta", "ump_bb_delta"]],
         on=["_ump", "season"], how="left")
+    return combined
+
+
+def _velo_asof_table(years: list[int]) -> pd.DataFrame:
+    """Per-start fastball velocity table with SHIFTED as-of aggregates per
+    pitcher: season-to-date mean and last-3-start mean, strictly prior starts
+    (compare on DATE with no exact match, so a same-day start never leaks).
+    velo_trend = recent minus season baseline: the fatigue/injury canary.
+    """
+    frames = []
+    for y in years:
+        f = cache.read_parquet_or_none(cache.dc_path(f"fbvelo_{y}_v1.parquet"))
+        if f is not None:
+            frames.append(f)
+    if not frames:
+        return pd.DataFrame()
+    v = pd.concat(frames, ignore_index=True)
+    v["_d"] = pd.to_datetime(v["game_date"], errors="coerce").dt.normalize()
+    v = v.sort_values(["player_id", "_d"]).reset_index(drop=True)
+    g = v.groupby(["player_id", "season"], sort=False)
+    sh = g["ff_velo"].shift(1)
+    v["velo_std"] = sh.groupby([v["player_id"], v["season"]], sort=False).transform(
+        lambda x: x.expanding(min_periods=2).mean())
+    v["velo_r3"] = sh.groupby([v["player_id"], v["season"]], sort=False).transform(
+        lambda x: x.rolling(3, min_periods=2).mean())
+    v["velo_trend"] = v["velo_r3"] - v["velo_std"]
+    return v[["player_id", "_d", "velo_r3", "velo_trend"]].dropna(subset=["_d"])
+
+
+def _join_velo_asof(combined: pd.DataFrame, velo: pd.DataFrame) -> pd.DataFrame:
+    if velo.empty:
+        return combined
+    left = combined.copy()
+    left["_d"] = pd.to_datetime(left["officialDate"], errors="coerce").dt.normalize()
+    left["_by"] = pd.to_numeric(left["personId"], errors="coerce").astype("float64")
+    left = left.reset_index().rename(columns={"index": "_row"})
+    ls = left.dropna(subset=["_by", "_d"]).sort_values("_d")
+    right = velo.copy()
+    right["_by"] = pd.to_numeric(right["player_id"], errors="coerce").astype("float64")
+    right = right.dropna(subset=["_by", "_d"]).sort_values("_d")
+    merged = pd.merge_asof(ls, right[["_by", "_d", "velo_r3", "velo_trend"]],
+                           on="_d", by="_by", direction="backward",
+                           allow_exact_matches=False)
+    for c in ("velo_r3", "velo_trend"):
+        combined[c] = np.nan
+        combined.loc[merged["_row"].values, c] = merged[c].values
+    return combined
+
+
+def _pen_fatigue_table(history: pd.DataFrame) -> pd.DataFrame:
+    """Per (teamId, officialDate): the team's RELIEF pitches thrown the PRIOR
+    day and prior two days. A taxed pen changes late-game run scoring and how
+    long the manager rides tomorrow's starter.
+    """
+    rp = history[history["played"] & history["is_pitcher"]
+                 & (history["is_sp"] == False)]  # noqa: E712
+    if rp.empty:
+        return pd.DataFrame()
+    day = (rp.groupby(["teamId", "officialDate"])["p_pitches"].sum()
+           .rename("pen_pitches").reset_index())
+    day["_d"] = pd.to_datetime(day["officialDate"], errors="coerce")
+    day["teamId"] = pd.to_numeric(day["teamId"], errors="coerce")
+    return day[["teamId", "_d", "pen_pitches"]]
+
+
+def _join_pen_fatigue(combined: pd.DataFrame, pen: pd.DataFrame,
+                      id_col: str, prefix: str) -> pd.DataFrame:
+    """Shift the per-(team, day) pen-pitch totals onto rows directly:
+    pen_yday = pitches on the row's date minus one day, pen_2day adds minus
+    two. Works for ANY row date (including today at inference, when the pen
+    has not pitched yet); a team off-day resolves to 0 = rested.
+    """
+    if pen.empty:
+        return combined
+    idx = pen.set_index(["teamId", "_d"])["pen_pitches"]
+    team = pd.to_numeric(combined[id_col], errors="coerce")
+    d = pd.to_datetime(combined["officialDate"], errors="coerce")
+    prev1 = idx.reindex(pd.MultiIndex.from_arrays([team, d - pd.Timedelta(days=1)])).values
+    prev2 = idx.reindex(pd.MultiIndex.from_arrays([team, d - pd.Timedelta(days=2)])).values
+    combined[f"{prefix}pen_yday"] = np.nan_to_num(prev1.astype(float), nan=0.0)
+    combined[f"{prefix}pen_2day"] = (combined[f"{prefix}pen_yday"]
+                                     + np.nan_to_num(prev2.astype(float), nan=0.0))
     return combined
 
 
@@ -859,6 +992,13 @@ def compute_pitcher_features(history: pd.DataFrame, targets: pd.DataFrame | None
 
     combined = _attach_environment(combined, ctx, history)
 
+    # Tier 4: within-season fastball-velocity trend (fatigue canary) and the
+    # pitcher's OWN team's pen fatigue (a taxed pen extends the starter).
+    velo_years = sorted(pd.Series(combined["season"]).dropna().unique().tolist())
+    combined = _join_velo_asof(combined, _velo_asof_table(velo_years))
+    combined = _join_pen_fatigue(combined, _pen_fatigue_table(history),
+                                 id_col="teamId", prefix="own_")
+
     out = combined[combined["_is_target"]].copy()
     return _assemble_pitcher_feature_cols(out, league, ctx, universe)
 
@@ -925,6 +1065,14 @@ def _assemble_pitcher_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
                       ("env_roof", "env_roof"), ("ump_k_delta", "ump_k_delta"),
                       ("ump_bb_delta", "ump_bb_delta")):
         f[name] = pd.to_numeric(_series(df, src), errors="coerce").values
+    # Tier-4 blocks: TTO decay profile (Y-1), velocity fatigue trend, own-pen
+    # fatigue.
+    for c in ("tto_k1", "tto_decay", "tto3_share", "tto_ppa"):
+        f[c] = ctx.tto_lookup(seasons, pids, c) if ctx is not None else np.nan
+    f["velo_r3"] = pd.to_numeric(_series(df, "velo_r3"), errors="coerce").values
+    f["velo_trend"] = pd.to_numeric(_series(df, "velo_trend"), errors="coerce").values
+    f["own_pen_yday"] = pd.to_numeric(_series(df, "own_pen_yday"), errors="coerce").values
+    f["own_pen_2day"] = pd.to_numeric(_series(df, "own_pen_2day"), errors="coerce").values
 
     if universe is not None:
         bmap = dict(zip(universe["personId"], universe["birthDate"]))

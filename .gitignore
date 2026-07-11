@@ -14,6 +14,7 @@ cache/*.pkl
 cache/*.json
 cache/*.log
 cache/raw_boxscores/
+cache/raw_statcast/
 !cache/gamelogs_*.parquet
 !cache/park_factors_*.parquet
 !cache/statcast_*.parquet

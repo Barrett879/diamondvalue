@@ -108,6 +108,19 @@ FEATURE_BLOCKS = {
     "ump_bat": {"cols": ["ump_k_delta", "ump_bb_delta"], "targets": set()},
     # Tier-3 candidate: structural expected-PA identity feature.
     "pa_struct": {"cols": ["pa_struct"], "targets": set()},
+    # Tier-4 candidate blocks: pitch-level TTO profiles, velocity fatigue
+    # trend, bullpen day-of fatigue.
+    # Tier-4 2025 JOINT confirmation (real validator): p_pitches dev -2.09%/
+    # MAE -1.35% (the largest confirmed gain in project history), p_BF -1.75%,
+    # p_H -1.26%, p_K -0.22% (sixth stacked gain), p_outs and PA small but
+    # double-negative. p_HR jointly regressed (struck); p_ER is 0-for-5.
+    "tto_pit": {"cols": ["tto_k1", "tto_decay", "tto3_share", "tto_ppa"],
+                "targets": {"p_pitches", "p_K", "p_H"}},
+    "velo_pit": {"cols": ["velo_r3", "velo_trend"],
+                 "targets": {"p_outs", "p_BF", "p_pitches", "p_K", "p_H"}},
+    "penfat_bat": {"cols": ["opp_pen_yday", "opp_pen_2day"], "targets": {"PA"}},
+    "penfat_pit": {"cols": ["own_pen_yday", "own_pen_2day"],
+                   "targets": {"p_outs", "p_BF", "p_pitches"}},
     "ump_pit": {"cols": ["ump_k_delta", "ump_bb_delta"],
                 "targets": {"p_BB", "p_K"}},
 }

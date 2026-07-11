@@ -59,7 +59,12 @@ def main(argv: list[str]) -> None:
     yesterday = today - dt.timedelta(days=1)
 
     import scripts.build_daily_predictions as bdp
+    import scripts.build_pitchlevel_backfill as bpb
     logger.warning("daily update for %s (ET)", today)
+    try:
+        bpb.update_current_velo(today.year)
+    except Exception as e:  # noqa: BLE001 -- velo upkeep is best-effort
+        logger.warning("velo update skipped: %s", e)
     bdp.main([today.isoformat()])
 
     import scripts.build_accuracy_tracker as bat
