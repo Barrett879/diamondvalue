@@ -374,9 +374,13 @@ def compute_batter_features(history: pd.DataFrame, targets: pd.DataFrame | None 
     opp = _pitcher_asof_table(history)
     combined = _join_pitcher_asof(combined, opp, id_col="oppStarterId", prefix="opp_")
 
-    # Own-team offense through the prior day (drives R/RBI context).
+    # Own-team offense through the prior day (drives R/RBI context) plus
+    # last-30-game recent form; and the OPPOSING BULLPEN quality (batters face
+    # relievers for a third or more of their PAs).
     team = _team_asof_table(history)
     combined = _join_team_asof(combined, team, id_col="teamId", prefix="own_")
+    bullpen = _bullpen_asof_table(history)
+    combined = _join_team_asof(combined, bullpen, id_col="oppTeamId", prefix="opp_")
 
     # Platoon split priors: the batter's regressed component rates vs the
     # starter's hand, from PRIOR seasons only.
@@ -445,6 +449,14 @@ def _assemble_batter_feature_cols(df, league, ctx, universe,
     # Own-team offense through the prior day.
     f["own_team_r_pa"] = df.get("own_team_r_pa", pd.Series(np.nan, index=df.index)).values
     f["own_team_obp"] = df.get("own_team_obp", pd.Series(np.nan, index=df.index)).values
+    # Round-4 candidate blocks (per-target policy decides who trains on them):
+    # own-team last-30 form, and the opposing bullpen's quality.
+    f["own_form_r_pa"] = df.get("own_form_r_pa", pd.Series(np.nan, index=df.index)).values
+    f["own_form_obp"] = df.get("own_form_obp", pd.Series(np.nan, index=df.index)).values
+    f["opp_bp_k"] = df.get("opp_bp_k_rate", pd.Series(np.nan, index=df.index)).values
+    f["opp_bp_bb"] = df.get("opp_bp_bb_rate", pd.Series(np.nan, index=df.index)).values
+    f["opp_bp_hr"] = df.get("opp_bp_hr_rate", pd.Series(np.nan, index=df.index)).values
+    f["opp_bp_er"] = df.get("opp_bp_er_out", pd.Series(np.nan, index=df.index)).values
 
     # Park factors (Y-1, by batter hand) and opposing catcher metrics, vectorized.
     if ctx is not None:
@@ -572,12 +584,51 @@ def _team_asof_table(history: pd.DataFrame) -> pd.DataFrame:
     g = tg.groupby(["teamId", "season"], sort=False)
     for c in ["PA", "SO", "H", "BB", "HBP", "R"]:
         tg[f"cum_{c}"] = g[c].cumsum() - tg[c]
+        # Last-30 TEAM GAMES recent form, shifted one game (excludes the row's
+        # own game); min 5 games so opening-week form is NaN rather than noise.
+        sh = g[c].shift(1)
+        tg[f"r30_{c}"] = sh.groupby([tg["teamId"], tg["season"]], sort=False).transform(
+            lambda s: s.rolling(30, min_periods=5).sum())
     pa = tg["cum_PA"].replace(0, np.nan)
+    pa30 = tg["r30_PA"].replace(0, np.nan)
     out = pd.DataFrame({
         "teamId": tg["teamId"], "gameDate": tg["gameDate"], "gameNumber": tg["gameNumber"],
         "team_k_rate": (tg["cum_SO"] / pa).values,
         "team_obp": ((tg["cum_H"] + tg["cum_BB"] + tg["cum_HBP"]) / pa).values,
         "team_r_pa": (tg["cum_R"] / pa).values,
+        "form_k_rate": (tg["r30_SO"] / pa30).values,
+        "form_obp": ((tg["r30_H"] + tg["r30_BB"] + tg["r30_HBP"]) / pa30).values,
+        "form_r_pa": (tg["r30_R"] / pa30).values,
+    })
+    return out.sort_values(["gameDate", "teamId"]).reset_index(drop=True)
+
+
+def _bullpen_asof_table(history: pd.DataFrame) -> pd.DataFrame:
+    """Per (teamId, gameDate) BULLPEN quality through the prior day: the team's
+    non-starter pitching aggregates (K/BB/HR per batter faced, ER per out),
+    season-to-date, shifted so a game never sees itself. Batters spend the late
+    innings against these arms; the model previously knew only the starter.
+    """
+    rp = history[history["played"] & history["is_pitcher"]
+                 & (history["is_sp"] == False)].copy()  # noqa: E712
+    if rp.empty:
+        return pd.DataFrame()
+    tg = rp.groupby(["teamId", "season", "officialDate", "gameNumber"]).agg(
+        BF=("p_BF", "sum"), K=("p_K", "sum"), BB=("p_BB", "sum"),
+        HR=("p_HR", "sum"), ER=("p_ER", "sum"), outs=("p_outs", "sum"),
+        gameDate=("gameDate", "first")).reset_index()
+    tg = tg.sort_values(["teamId", "gameDate", "gameNumber"]).reset_index(drop=True)
+    g = tg.groupby(["teamId", "season"], sort=False)
+    for c in ["BF", "K", "BB", "HR", "ER", "outs"]:
+        tg[f"cum_{c}"] = g[c].cumsum() - tg[c]
+    bf = tg["cum_BF"].replace(0, np.nan)
+    outs = tg["cum_outs"].replace(0, np.nan)
+    out = pd.DataFrame({
+        "teamId": tg["teamId"], "gameDate": tg["gameDate"], "gameNumber": tg["gameNumber"],
+        "bp_k_rate": (tg["cum_K"] / bf).values,
+        "bp_bb_rate": (tg["cum_BB"] / bf).values,
+        "bp_hr_rate": (tg["cum_HR"] / bf).values,
+        "bp_er_out": (tg["cum_ER"] / outs).values,
     })
     return out.sort_values(["gameDate", "teamId"]).reset_index(drop=True)
 
@@ -594,7 +645,8 @@ def _join_team_asof(combined, team_table, id_col, prefix) -> pd.DataFrame:
     right["_gd"] = pd.to_datetime(right["gameDate"], errors="coerce")
     right["_by"] = pd.to_numeric(right["teamId"], errors="coerce").astype("float64")
     right = right.dropna(subset=["_by", "_gd"]).sort_values("_gd")
-    rate_cols = [c for c in right.columns if c.startswith("team_")]
+    rate_cols = [c for c in right.columns
+                 if c not in ("teamId", "gameDate", "gameNumber", "_gd", "_by")]
     merged = pd.merge_asof(
         left_sorted, right[["_by", "_gd"] + rate_cols],
         on="_gd", by="_by",
@@ -670,10 +722,12 @@ def _assemble_pitcher_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
     f["marcel_ER"] = df["marcel_p_ER"].values
     f["std_pitches_r30"] = (df["p_r30_p_BF"]).values  # BF over last 30 as a workload proxy
 
-    # Opposing team offense.
+    # Opposing team offense (season-to-date, plus round-4 last-30 form block).
     f["opp_team_k"] = df.get("opp_team_k_rate", pd.Series(np.nan, index=df.index)).values
     f["opp_team_obp"] = df.get("opp_team_obp", pd.Series(np.nan, index=df.index)).values
     f["opp_team_r_pa"] = df.get("opp_team_r_pa", pd.Series(np.nan, index=df.index)).values
+    f["opp_form_k"] = df.get("opp_form_k_rate", pd.Series(np.nan, index=df.index)).values
+    f["opp_form_obp"] = df.get("opp_form_obp", pd.Series(np.nan, index=df.index)).values
 
     # Park (Y-1, all-hand) and own catcher framing, vectorized.
     if ctx is not None:

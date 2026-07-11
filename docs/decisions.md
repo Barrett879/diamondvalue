@@ -103,6 +103,27 @@ pin down, so Barrett can audit later. Newest at the bottom.
   carry most of the contact-quality signal; Statcast's marginal value here is
   in rare-event skills (speed -> steals), not general hitting quality.
 
+## Accuracy round 4: bullpen + team form (2026-07-11)
+
+- Three candidate blocks, all point-in-time from existing gamelogs, ablated
+  per-target on 2024 via the generalized scripts/exp_feature_blocks.py:
+  1. REJECTED: opposing BULLPEN quality (K/BB/HR per BF, ER/out of the
+     opponent's non-starters). Mechanistically appealing (batters face
+     relievers for a third of their PAs) but nothing above the noise floor;
+     season-aggregate bullpen quality is too diffuse (availability varies
+     nightly).
+  2. REJECTED: own-team last-30 form for batters. Nothing above noise. Third
+     consecutive round where hot/cold-streak-style signals fail, consistent
+     with the professional systems' view.
+  3. SHIPPED for p_K ONLY: opposing lineup's last-30 form (form_k_rate,
+     form_obp) for starting pitchers. K improved on BOTH years (2024 dev
+     -0.41%/MAE -0.23%; 2025 dev -0.19%/MAE -0.20%). Its 2024 ER gain
+     (dev -0.64%) FAILED the 2025 confirmation (slightly worse) and was
+     rejected -- the two-stage design catching a validation-year mirage.
+- Deterministic-retrain proof: only p_K_histgb_m1.joblib changed bytes.
+- Feature-block gating generalized in mlblib/model.py FEATURE_BLOCKS;
+  rejected blocks' columns remain computed (cheap) but train nothing.
+
 ## Phase 4 (daily pipeline)
 
 - INFERENCE HISTORY FILTER (important): build_daily_predictions filters history

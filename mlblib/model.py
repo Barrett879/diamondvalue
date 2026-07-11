@@ -63,14 +63,32 @@ STATCAST_COLS = [
     "sc_sprint", "opp_sc_xwoba", "opp_sc_brl_pct",
     "sc_xwoba_ag", "sc_avg_ev_ag", "sc_brl_pct_ag",
 ]
-STATCAST_TARGETS = {"SB"}
+
+# Gated feature blocks: each block's columns train ONLY the targets in its set.
+# Membership is decided by per-target ablation on the 2024 validation year
+# (scripts/exp_feature_blocks.py); an empty set means the block is computed but
+# ships nowhere (kept for future rounds).
+FEATURE_BLOCKS = {
+    "statcast": {"cols": STATCAST_COLS, "targets": {"SB"}},
+    # Round-4 ablation on 2024 (exp_feature_blocks.py): opposing bullpen and
+    # own-team form showed nothing above the noise floor anywhere (rejected).
+    # The opposing lineup's last-30 form helped the starter's K on BOTH 2024
+    # (dev -0.41%) and 2025 (dev -0.19%) -> shipped for p_K. Its 2024 ER gain
+    # (-0.64%) FAILED to replicate on 2025 (slightly worse) -> rejected.
+    "bullpen": {"cols": ["opp_bp_k", "opp_bp_bb", "opp_bp_hr", "opp_bp_er"],
+                "targets": set()},
+    "teamform": {"cols": ["own_form_r_pa", "own_form_obp"], "targets": set()},
+    "oppform": {"cols": ["opp_form_k", "opp_form_obp"], "targets": {"p_K"}},
+}
 
 
 def target_feature_cols(target: str, all_cols: list[str]) -> list[str]:
-    """The feature list one target's model trains on (the Statcast policy)."""
-    if target in STATCAST_TARGETS:
-        return list(all_cols)
-    return [c for c in all_cols if c not in STATCAST_COLS]
+    """The feature list one target's model trains on (the block policy)."""
+    drop: set[str] = set()
+    for block in FEATURE_BLOCKS.values():
+        if target not in block["targets"]:
+            drop.update(block["cols"])
+    return [c for c in all_cols if c not in drop]
 
 
 def _artifact_file(target: str):
