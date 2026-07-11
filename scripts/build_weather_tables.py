@@ -82,6 +82,11 @@ def _parse_info(info: list) -> dict:
     um = re.search(r"HP:\s*([^.]+)\.", ump)
     if um:
         out["hp_ump"] = um.group(1).strip()
+    # Full crew positions, for next-day crew-rotation inference (standard
+    # 4-man rotation: yesterday's 1B umpire works the plate today).
+    for pos, col in (("1B", "u1b"), ("2B", "u2b"), ("3B", "u3b")):
+        pm = re.search(rf"{pos}:\s*([^.]+)\.", ump)
+        out[col] = pm.group(1).strip() if pm else None
     return out
 
 

@@ -36,6 +36,13 @@ CHUNK_DAYS = 3
 ROW_CAP = 25000
 KEEP = ["game_pk", "game_date", "pitcher", "n_thruorder_pitcher",
         "pitch_type", "release_speed", "description", "events"]
+# Round-5 re-pull: the columns the v1 pull discarded that the next feature
+# round needs (catcher framing v2, batter-vs-velocity, true per-PA platoon,
+# release-point/spin drift, process-based batter form).
+KEEP2 = KEEP + ["batter", "fielder_2", "stand", "p_throws",
+                "release_pos_x", "release_pos_z", "release_spin_rate",
+                "plate_x", "plate_z", "sz_top", "sz_bot", "zone",
+                "estimated_woba_using_speedangle"]
 _SWING_MISS = {"swinging_strike", "swinging_strike_blocked", "foul_tip"}
 
 
@@ -48,7 +55,8 @@ def _season_days(season: int):
         cur += dt.timedelta(days=CHUNK_DAYS)
 
 
-def _fetch_chunk(d0: dt.date, d1: dt.date) -> pd.DataFrame | None:
+def _fetch_chunk(d0: dt.date, d1: dt.date, keep: list[str] | None = None) -> pd.DataFrame | None:
+    keep = keep or KEEP
     params = {
         "all": "true", "player_type": "pitcher", "type": "details",
         "game_date_gt": d0.isoformat(), "game_date_lt": d1.isoformat(),
@@ -58,7 +66,7 @@ def _fetch_chunk(d0: dt.date, d1: dt.date) -> pd.DataFrame | None:
                             have_stale=False, session=fetch._savant)
     if not text or "," not in text[:200]:
         return None
-    df = pd.read_csv(io.StringIO(text), usecols=lambda c: c in KEEP,
+    df = pd.read_csv(io.StringIO(text), usecols=lambda c: c in keep,
                      low_memory=False)
     assert len(df) < ROW_CAP, (
         f"chunk {d0}..{d1} hit the 25k silent-truncation cap ({len(df)} rows); "
@@ -154,7 +162,40 @@ def update_current_velo(season: int, days: int = 8) -> None:
     logger.warning("velo update %s: +%d starts (total %d)", season, len(new), len(combined))
 
 
+def fetch_v2_parts(season: int) -> None:
+    """Round-5 re-pull: cache full-column (KEEP2) chunk parts as red2_*.parquet
+    under cache/raw_statcast/. No reduction yet -- the v2 feature tables
+    (framing, batter-vs-velo, platoon, release drift) are built from these in
+    a later round. Resumable; skips parts already on disk.
+    """
+    today = dt.date.today()
+    n = 0
+    for d0, d1 in _season_days(season):
+        if d0 > today:
+            break
+        part_path = (cache.CACHE_DIR / "raw_statcast" /
+                     f"red2_{d0.isoformat()}_{d1.isoformat()}.parquet")
+        if part_path.exists():
+            continue
+        df = _fetch_chunk(d0, min(d1, today), keep=KEEP2)
+        time.sleep(2.0)
+        if df is None or df.empty:
+            continue
+        cache.atomic_to_parquet(df, part_path)
+        n += 1
+        if n % 10 == 0:
+            logger.warning("v2 %s: through %s", season, d1)
+    logger.warning("v2 %s: done (%d new parts)", season, n)
+
+
 def main(argv: list[str]) -> None:
+    if argv and argv[0] == "v2":
+        rest = argv[1:]
+        seasons = (ALL_SEASONS + [2026]) if (not rest or rest[0] == "all") \
+            else [int(a) for a in rest]
+        for s in seasons:
+            fetch_v2_parts(s)
+        return
     seasons = ALL_SEASONS if (not argv or argv[0] == "all") else [int(a) for a in argv]
     for s in seasons:
         build_season(s)

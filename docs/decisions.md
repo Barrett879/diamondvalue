@@ -230,3 +230,46 @@ pin down, so Barrett can audit later. Newest at the bottom.
   starts). TTO uses Y-1 only, so no in-season upkeep needed.
 - Deferred (needs a re-pull keeping fielder_2/plate coords): catcher
   framing v2, batter-vs-velocity splits, catcher-throwing vs SB.
+
+## Round 5 (2026-07-11 night): the live-season blind spot
+
+Motivation: the 2026 ABS challenge system moved league walks ~7.3% -- drift a
+2025 backtest cannot see. Three mechanisms tested, one shipped narrowly, one
+rejected cleanly, one shipped after direct measurement.
+
+**League-environment features (lgenv): shipped for batter BB only.** New
+point-in-time table: rolling last-30-game-day league BB/K/R/HR per PA joined
+as-of (strictly prior day), identical at train and inference. 2024 ablation:
+noise or harm everywhere (p_pitches +2.37% dev) except p_K (-0.13%) and BB
+(-0.04% dev, -0.12% MAE). 2025 confirmation: BB replicated (MAE 0.4241 ->
+0.4235, dev negative both years) -> SHIPPED; p_K's deviance flipped sign
+(+0.02%) -> struck. Deterministic retrain: only BB_histgb_m1.joblib changed
+bytes. The one target the ABS rule most directly moves is the one that now
+carries a live league-walk-environment handle.
+
+**Self-correcting bias loop: REJECTED (third designated mirage).** Mechanism:
+per-stat trailing-30-day sum(actual)/sum(pred) ratio, clipped [0.9, 1.1],
+min 8 prior dates (scripts/exp_bias_loop.py). Tested three ways: (a) stable
+year, 2021-23 models on 2025: all deltas within noise, MAE regressions on
+rare stats (SB +3.6%); (b) drift simulation, 2021-22 dead-ball-era models on
+2025: still near-zero -- the rolling player-rate features already absorb
+regime drift; (c) the one double-negative survivor (p_H) failed the
+independent 2024 year (dev -0.02%, MAE +0.14%). Both 2025 tests shared the
+same actuals, so they were never two independent looks. Do not revive without
+a genuinely new design.
+
+**Umpire crew-rotation inference: SHIPPED.** Yesterday's 1B umpire works the
+plate today (standard 4-man rotation): measured 97.2% accurate over 10,024
+consecutive-day series games 2019-2025 (vs 1.7% for yesterday's 2B, 0.0% for
+yesterday's HP). build_weather_tables.py now parses the full crew (u1b/u2b/
+u3b in game_weather_v1.parquet); _crew_rotation_hp() in the daily pipeline
+fills hp_ump when GUMBO hasn't posted (morning runs), abstaining on series
+openers. Live check on the 2026-07-11 slate: 13/14 correct, 2 openers
+correctly skipped. The shipped ump_pit features (p_BB, p_K) are now live in
+morning runs for ~2 of every 3 games instead of ~none.
+
+**Pitch-level re-pull v2: running.** build_pitchlevel_backfill.py `v2` mode
+caches full-column chunks (batter, fielder_2/catcher, plate_x/z, sz_top/bot,
+release point/spin, stand/p_throws, xwOBA-on-contact) as red2_* parts,
+2020-2026, resumable, gitignored. Unlocks next round: catcher framing v2,
+batter-vs-velocity, true per-PA platoon, release-point drift.

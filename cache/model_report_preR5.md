@@ -9,7 +9,7 @@ Train seasons [2021, 2022, 2023], test season 2025. Every stat is evaluated at t
 - `H` [PASS]: beats season-average and Marcel baselines (model MAE 0.675 vs season-avg 0.684, Marcel 0.687).
 - `TB` [PASS]: beats season-average and Marcel baselines (model MAE 1.260 vs season-avg 1.287, Marcel 1.293).
 - `HR` [PASS]: beats season-average and Marcel baselines (model MAE 0.191 vs season-avg 0.192, Marcel 0.200).
-- `BB` [PASS]: beats season-average and Marcel baselines (model MAE 0.423 vs season-avg 0.429, Marcel 0.437).
+- `BB` [PASS]: beats season-average and Marcel baselines (model MAE 0.424 vs season-avg 0.429, Marcel 0.437).
 - `SO` [PASS]: beats season-average and Marcel baselines (model MAE 0.664 vs season-avg 0.678, Marcel 0.675).
 - `b1` [PASS]: beats season-average and Marcel baselines (model MAE 0.588 vs season-avg 0.588, Marcel 0.597).
 - `b2` [MARGINAL]: better calibrated (deviance) but MAE near baseline (model MAE 0.263 vs season-avg 0.260, Marcel 0.266).
@@ -36,7 +36,7 @@ Train seasons [2021, 2022, 2023], test season 2025. Every stat is evaluated at t
 | H      | 50887 |      0.6753 |   0.7137 |   0.684  |   0.6866 |      1.0323 |   1.4102 |   1.0622 |
 | TB     | 50887 |      1.2598 |   1.2813 |   1.2869 |   1.2933 |      2.0118 |   2.6306 |   2.0645 |
 | HR     | 50887 |      0.1908 |   0.1942 |   0.1921 |   0.1996 |      0.485  |   0.8255 |   0.4913 |
-| BB     | 50887 |      0.4235 |   0.4407 |   0.4292 |   0.4371 |      0.8011 |   1.1933 |   0.8191 |
+| BB     | 50887 |      0.4241 |   0.4407 |   0.4292 |   0.4371 |      0.8012 |   1.1933 |   0.8191 |
 | SO     | 50887 |      0.6639 |   0.7    |   0.6782 |   0.675  |      0.9875 |   1.3275 |   1.0205 |
 | b1     | 50887 |      0.5876 |   0.6033 |   0.5878 |   0.5973 |      0.9655 |   1.3723 |   0.9835 |
 | b2     | 50887 |      0.263  |   0.2583 |   0.2596 |   0.2657 |      0.5934 |   1.0062 |   0.6003 |

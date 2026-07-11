@@ -121,6 +121,17 @@ FEATURE_BLOCKS = {
     "penfat_bat": {"cols": ["opp_pen_yday", "opp_pen_2day"], "targets": {"PA"}},
     "penfat_pit": {"cols": ["own_pen_yday", "own_pen_2day"],
                    "targets": {"p_outs", "p_BF", "p_pitches"}},
+    # Round-5 blocks: rolling last-30-game-day league BB/K/R/HR per PA, the
+    # regime-shift tracker (2026 ABS challenge system). 2024 ablation: noise
+    # or harm everywhere except p_K (-0.13% dev) and BB (-0.04% dev,
+    # -0.12% MAE). 2025 confirmation: BB replicated (MAE -0.14%, dev -0.01%,
+    # negative on both metrics both years) and ships; p_K's deviance flipped
+    # sign (+0.02%) -> struck. Live 2026 drift correction for everything else
+    # is the bias loop's job, not a tree feature's.
+    "lgenv_bat": {"cols": ["lg_bb30", "lg_k30", "lg_r30", "lg_hr30"],
+                  "targets": {"BB"}},
+    "lgenv_pit": {"cols": ["lg_bb30", "lg_k30", "lg_r30", "lg_hr30"],
+                  "targets": set()},
     "ump_pit": {"cols": ["ump_k_delta", "ump_bb_delta"],
                 "targets": {"p_BB", "p_K"}},
 }

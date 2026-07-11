@@ -496,6 +496,9 @@ def compute_batter_features(history: pd.DataFrame, targets: pd.DataFrame | None 
     combined = _join_pen_fatigue(combined, _pen_fatigue_table(history),
                                  id_col="oppTeamId", prefix="opp_")
 
+    # League-environment drift (round 5).
+    combined = _join_league_env(combined, _league_env_table(history))
+
     out = combined[combined["_is_target"]].copy()
     feat = _assemble_batter_feature_cols(out, league, ctx, universe, lg_plat)
     return feat
@@ -581,6 +584,9 @@ def _assemble_batter_feature_cols(df, league, ctx, universe,
     # Tier-4 block: opposing bullpen day-of fatigue.
     f["opp_pen_yday"] = pd.to_numeric(_series(df, "opp_pen_yday"), errors="coerce").values
     f["opp_pen_2day"] = pd.to_numeric(_series(df, "opp_pen_2day"), errors="coerce").values
+    # Round-5 block: rolling league environment (regime-shift tracker).
+    for c in ("lg_bb30", "lg_k30", "lg_r30", "lg_hr30"):
+        f[c] = pd.to_numeric(_series(df, c), errors="coerce").values
 
     # Park factors (Y-1, by batter hand) and opposing catcher metrics, vectorized.
     if ctx is not None:
@@ -820,6 +826,45 @@ def _join_pen_fatigue(combined: pd.DataFrame, pen: pd.DataFrame,
     return combined
 
 
+def _league_env_table(history: pd.DataFrame) -> pd.DataFrame:
+    """Rolling LEAGUE-WIDE environment through the prior day: last-30-day
+    league BB/PA, K/PA, R/PA, HR/PA across all games. Lets models track
+    league-level regime shifts (sticky-stuff crackdown, dead balls, the 2026
+    ABS challenge system) that per-player priors cannot see.
+    """
+    b = history[history["played"] & history["is_batter"]]
+    day = b.groupby("officialDate").agg(
+        PA=("PA", "sum"), BB=("BB", "sum"), SO=("SO", "sum"),
+        R=("R", "sum"), HR=("HR", "sum")).reset_index().sort_values("officialDate")
+    day["_d"] = pd.to_datetime(day["officialDate"], errors="coerce")
+    roll = day[["PA", "BB", "SO", "R", "HR"]].rolling(30, min_periods=10).sum()
+    pa = roll["PA"].replace(0, np.nan)
+    out = pd.DataFrame({
+        "_d": day["_d"],
+        "lg_bb30": (roll["BB"] / pa).values,
+        "lg_k30": (roll["SO"] / pa).values,
+        "lg_r30": (roll["R"] / pa).values,
+        "lg_hr30": (roll["HR"] / pa).values,
+    }).dropna(subset=["_d"])
+    return out
+
+
+def _join_league_env(combined: pd.DataFrame, env: pd.DataFrame) -> pd.DataFrame:
+    if env.empty:
+        return combined
+    left = combined.copy()
+    left["_d"] = pd.to_datetime(left["officialDate"], errors="coerce")
+    left = left.reset_index().rename(columns={"index": "_row"})
+    ls = left.dropna(subset=["_d"]).sort_values("_d")
+    right = env.sort_values("_d")
+    merged = pd.merge_asof(ls, right, on="_d", direction="backward",
+                           allow_exact_matches=False)
+    for c in ("lg_bb30", "lg_k30", "lg_r30", "lg_hr30"):
+        combined[c] = np.nan
+        combined.loc[merged["_row"].values, c] = merged[c].values
+    return combined
+
+
 def _league_platoon_rates(hist: pd.DataFrame) -> pd.DataFrame:
     """League component rates by (batSide, starter hand) — the shrink target."""
     sub = hist[hist["oppStarterHand"].isin(["L", "R"]) & hist["batSide"].isin(["L", "R", "S"])]
@@ -998,6 +1043,7 @@ def compute_pitcher_features(history: pd.DataFrame, targets: pd.DataFrame | None
     combined = _join_velo_asof(combined, _velo_asof_table(velo_years))
     combined = _join_pen_fatigue(combined, _pen_fatigue_table(history),
                                  id_col="teamId", prefix="own_")
+    combined = _join_league_env(combined, _league_env_table(history))
 
     out = combined[combined["_is_target"]].copy()
     return _assemble_pitcher_feature_cols(out, league, ctx, universe)
@@ -1073,6 +1119,9 @@ def _assemble_pitcher_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
     f["velo_trend"] = pd.to_numeric(_series(df, "velo_trend"), errors="coerce").values
     f["own_pen_yday"] = pd.to_numeric(_series(df, "own_pen_yday"), errors="coerce").values
     f["own_pen_2day"] = pd.to_numeric(_series(df, "own_pen_2day"), errors="coerce").values
+    # Round-5 block: rolling league environment.
+    for c in ("lg_bb30", "lg_k30", "lg_r30", "lg_hr30"):
+        f[c] = pd.to_numeric(_series(df, c), errors="coerce").values
 
     if universe is not None:
         bmap = dict(zip(universe["personId"], universe["birthDate"]))
