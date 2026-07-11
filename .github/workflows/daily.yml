@@ -1,0 +1,51 @@
+# Daily self-refresh: generate today's predictions, score yesterday's, commit.
+# Streamlit Cloud redeploys automatically on each push to main.
+#
+# Two runs per day (crons are UTC):
+#   14:00 UTC ~ 10:00 ET  morning run  (probable pitchers, projected lineups)
+#   21:30 UTC ~ 17:30 ET  pre-game run (most posted lineups are in by then)
+name: daily-refresh
+
+on:
+  schedule:
+    - cron: "0 14 * * *"
+    - cron: "30 21 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily update
+        run: python scripts/daily_update.py
+
+      - name: Commit and push refreshed caches
+        run: |
+          git config user.name "diamondvalue-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A cache/
+          if git diff --cached --quiet; then
+            echo "Nothing changed; skipping commit."
+          else
+            git commit -m "Daily refresh $(date -u '+%Y-%m-%d %H:%M') UTC"
+            git pull --rebase origin main
+            git push origin main
+          fi
