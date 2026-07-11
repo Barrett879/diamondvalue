@@ -28,6 +28,14 @@ def today_iso() -> str:
     return dt.date.today().isoformat()
 
 
+def game_url(date: str, game_pk, dark: bool) -> str:
+    """Link to the game detail page, preserving the date and theme so a
+    full-reload navigation (each Streamlit page is a fresh session) keeps them.
+    """
+    theme = "dark" if dark else "light"
+    return f"/Game?date={date}&gamePk={game_pk}&theme={theme}"
+
+
 def parse_iso_date(s: str | None) -> dt.date | None:
     if not s:
         return None

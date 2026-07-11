@@ -181,6 +181,26 @@ COMMON_CSS = """
     .dv-badge.confirmed { background: var(--tint-good); color: var(--value-good); }
     .dv-badge.projected { background: var(--tint-even); color: var(--amber); }
     .dv-note { color: var(--fg-4); font-size: 0.85rem; }
+    /* Clickable game cards on the slate */
+    a.dv-game-card {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 1rem; flex-wrap: wrap;
+        padding: 0.85rem 1.15rem; margin-bottom: 0.6rem;
+        background: var(--panel); border: 1px solid var(--panel-line);
+        border-radius: 12px; text-decoration: none;
+        box-shadow: var(--shadow-card); transition: border-color .12s, transform .12s;
+    }
+    a.dv-game-card:hover { border-color: var(--accent-teal); transform: translateY(-1px); }
+    .dv-game-match { font-size: 1.05rem; font-weight: 700; color: var(--fg-1); }
+    .dv-game-match .at { color: var(--fg-4); font-weight: 500; margin: 0 0.3rem; }
+    .dv-game-right { display: flex; align-items: center; gap: 0.9rem; }
+    .dv-game-time { color: var(--fg-3); font-size: 0.9rem; }
+    .dv-game-arrow { color: var(--accent-teal); font-weight: 700; }
+    a.dv-back {
+        display: inline-block; color: var(--accent-teal); text-decoration: none;
+        font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem;
+    }
+    a.dv-back:hover { filter: brightness(1.1); }
     .dv-footer {
         margin-top: 3.5rem; padding-top: 1.3rem; font-size: 0.82rem;
         border-top: 1px solid var(--panel-line); color: var(--fg-5);

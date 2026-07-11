@@ -1,16 +1,14 @@
 """DiamondValue home / slate page.
 
-Shows, for a chosen date, every game with predicted per-game stats for each
-player. When the day's predictions file has not been built yet (or a model is
-unavailable) it falls back to the live schedule view: games, probables, and
-posted lineups. The date-picker machinery is the Phase 1.5 foundation.
+Pick a date, then click a game to open its detail page (both teams' full rosters
+with every predicted metric). This page is the slate index; the per-game metrics
+live on the Game page (pages/Game.py) at its own URL.
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -23,7 +21,7 @@ from mlblib.theme import (  # noqa: E402
     render_page_chrome,
     render_theme_toggle,
 )
-from mlblib.util import game_time_et, parse_iso_date, today_iso  # noqa: E402
+from mlblib.util import game_time_et, game_url, parse_iso_date, today_iso  # noqa: E402
 
 st.set_page_config(page_title="DiamondValue", page_icon="static/favicon.svg",
                    layout="wide")
@@ -54,108 +52,72 @@ if "slate_date" not in st.session_state:
 st.date_input("Game date", key="slate_date", on_change=_mirror_date)
 _mirror_date()
 date_iso = st.session_state["slate_date"].isoformat()
+dark = st.session_state.get("theme_dark", False)
 
 
-def _badge(status: str) -> str:
-    label = "Lineup posted" if status == "confirmed" else "Projected lineup"
-    return f'<span class="dv-badge {status}">{label}</span>'
+def _slate_rows():
+    """Unified game list [(gamePk, away, home, et, status)] for the date.
 
-
-def _render_side(side_df: pd.DataFrame, team_abbr: str, probable: str | None,
-                 status: str, pit_df: pd.DataFrame):
-    st.markdown(
-        f"<b>{team_abbr}</b> &nbsp; <span class='dv-note'>SP: {probable or 'TBD'}</span> "
-        f"{_badge(status)}", unsafe_allow_html=True)
-    if not pit_df.empty:
-        st.caption("Starting pitcher (expected)")
-        st.dataframe(store.format_pitcher_table(pit_df), hide_index=True,
-                     use_container_width=True)
-    starters = side_df[(side_df["role"] == "bat") & (side_df["is_bench"] == False)].sort_values("slot")  # noqa: E712
-    bench = side_df[(side_df["role"] == "bat") & (side_df["is_bench"] == True)]  # noqa: E712
-    st.caption("Lineup (expected)")
-    st.dataframe(store.format_batter_table(starters), hide_index=True,
-                 use_container_width=True)
-    if not bench.empty:
-        # Bench rendered inline (Streamlit forbids an expander nested inside the
-        # game expander); the caption makes the conditional framing explicit.
-        st.caption(f"Bench ({len(bench)}) — per game if he starts")
-        st.dataframe(store.format_batter_table(bench), hide_index=True,
-                     use_container_width=True)
-
-
-def _render_predictions(preds: pd.DataFrame, meta: list) -> None:
-    st.markdown(f"### {len(meta)} game{'s' if len(meta) != 1 else ''} on {date_iso}")
-    meta_by_pk = {m["gamePk"]: m for m in meta}
-    for gpk, gp in preds.groupby("gamePk"):
-        m = meta_by_pk.get(gpk, {})
-        et = game_time_et(m.get("gameDate"))
-        away, home = m.get("away", "AWY"), m.get("home", "HOM")
-        gnum = m.get("gameNumber", 1)
-        dh = f"  (G{gnum})" if gnum and gnum > 1 else ""
-        label = f"{away}  @  {home}      {et}{dh}"
-        with st.expander(label):
-            c_away, c_home = st.columns(2)
-            for col, is_home in ((c_away, False), (c_home, True)):
-                with col:
-                    side_df = gp[gp["isHome"] == is_home]
-                    if side_df.empty:
-                        st.caption("No data")
-                        continue
-                    team_abbr = (m.get("teams", {}).get("home" if is_home else "away", {})
-                                 .get("abbr", SENTINEL))
-                    status = (m.get("teams", {}).get("home" if is_home else "away", {})
-                              .get("lineup_status", "projected"))
-                    probable = (m.get("teams", {}).get("home" if is_home else "away", {})
-                                .get("probable"))
-                    pit_df = side_df[side_df["role"] == "pit"]
-                    _render_side(side_df, team_abbr, probable, status, pit_df)
-
-
-def _render_schedule_only() -> None:
-    """Fallback when no predictions file exists for the date."""
-    with st.spinner("Loading slate..."):
-        slate = fetch.get_slate(date_iso, today=today_iso())
-    if not slate:
-        st.info(f"No MLB games scheduled for {date_iso}.")
-        return
-    st.markdown(f"### {len(slate)} game{'s' if len(slate) != 1 else ''} on {date_iso}")
-    st.caption("Predictions for this date have not been generated yet. Showing "
-               "the schedule, probable starters, and posted lineups.")
+    Prefers the committed slate-meta JSON (offline, no network) when the day's
+    predictions exist; otherwise fetches the live schedule.
+    """
+    meta = store.load_slate_meta(date_iso)
+    preds = store.load_predictions(date_iso)
+    has_numbers = (preds is not None and not preds.empty
+                   and preds.get("PA", None) is not None and preds["PA"].notna().any())
+    if meta and has_numbers:
+        rows = []
+        for m in meta:
+            tinfo = m.get("teams", {})
+            statuses = [tinfo.get(k, {}).get("lineup_status", "projected")
+                        for k in ("home", "away")]
+            posted = sum(1 for s in statuses if s == "confirmed")
+            rows.append((m["gamePk"], m.get("away", "AWY"), m.get("home", "HOM"),
+                         game_time_et(m.get("gameDate")), _status_text(posted)))
+        return rows
+    # Live schedule fallback.
+    slate = fetch.get_slate(date_iso, today=today_iso())
+    rows = []
     for g in slate:
-        away, home = g["away"], g["home"]
-        et = game_time_et(g.get("gameDate"))
-        a = away.get("abbr") or away.get("name") or SENTINEL
-        h = home.get("abbr") or home.get("name") or SENTINEL
-        with st.expander(f"{a}  @  {h}      {et}"):
-            c_away, c_home = st.columns(2)
-            for col, team in ((c_away, away), (c_home, home)):
-                with col:
-                    prob = team.get("probable")
-                    st.markdown(f"<b>{team.get('name')}</b> "
-                                f"<span class='dv-note'>SP: {prob['name'] if prob else 'TBD'}</span>",
-                                unsafe_allow_html=True)
-                    lineup = team.get("lineup") or []
-                    if lineup:
-                        st.markdown("".join(
-                            f"<div class='dv-note'>{i + 1}. {p['name']}</div>"
-                            for i, p in enumerate(lineup)), unsafe_allow_html=True)
-                    else:
-                        st.markdown("<div class='dv-note'>Lineup not yet posted.</div>",
-                                    unsafe_allow_html=True)
+        posted = sum(1 for t in (g["home"], g["away"]) if t.get("lineup"))
+        rows.append((g["gamePk"], g["away"].get("abbr") or g["away"].get("name") or SENTINEL,
+                     g["home"].get("abbr") or g["home"].get("name") or SENTINEL,
+                     game_time_et(g.get("gameDate")), _status_text(posted)))
+    return rows
 
 
-preds = store.load_predictions(date_iso)
-meta = store.load_slate_meta(date_iso)
-has_numbers = preds is not None and not preds.empty and preds.get("PA") is not None \
-    and preds["PA"].notna().any()
+def _status_text(posted: int) -> str:
+    return ("lineups posted" if posted == 2
+            else "1 lineup posted" if posted == 1
+            else "lineups not posted")
 
-if has_numbers and meta:
-    _render_predictions(preds, meta)
-else:
-    _render_schedule_only()
+
+with st.spinner("Loading slate..."):
+    rows = _slate_rows()
+
+if not rows:
+    st.info(f"No MLB games scheduled for {date_iso}.")
+    render_footer()
+    st.stop()
+
+st.markdown(f"### {len(rows)} game{'s' if len(rows) != 1 else ''} on {date_iso}")
+st.caption("Click a game to see both teams' rosters and every predicted stat.")
+
+cards = []
+for gpk, away, home, et, status in rows:
+    href = game_url(date_iso, gpk, dark)
+    cards.append(
+        f'<a class="dv-game-card" href="{href}" target="_self">'
+        f'<span class="dv-game-match">{away}<span class="at">@</span>{home}</span>'
+        f'<span class="dv-game-right">'
+        f'<span class="dv-game-time">{et} &middot; {status}</span>'
+        f'<span class="dv-game-arrow">&rarr;</span>'
+        f"</span></a>"
+    )
+st.markdown("".join(cards), unsafe_allow_html=True)
 
 st.caption("Pitcher strikeouts are the most predictable per-game stat. Batter "
            "single-game numbers are low-signal by nature; treat every value as "
-           "a distribution mean. See the About page for how this is built.")
+           "a distribution mean.")
 
 render_footer()
