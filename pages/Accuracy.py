@@ -52,10 +52,11 @@ if {"stat", "abs_err_model", "abs_err_b2"}.issubset(acc.columns):
 
     chart = summary.sort_values("edge", ascending=False)
     fig = go.Figure()
+    _dark = st.session_state.get("theme_dark", False)
     fig.add_bar(name="Model", x=chart["stat"], y=chart["model_MAE"],
-                marker_color="#17b890")
+                marker_color="#16d4c1" if _dark else "#0fae9d")
     fig.add_bar(name="Season average", x=chart["stat"], y=chart["seasonavg_MAE"],
-                marker_color="#8a97a0")
+                marker_color="#8a8a93")
     fig.update_layout(barmode="group", height=360,
                       margin=dict(l=10, r=10, t=30, b=10),
                       legend=dict(orientation="h", y=1.12),

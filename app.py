@@ -19,7 +19,6 @@ from mlblib.theme import (  # noqa: E402
     render_footer,
     render_nav,
     render_page_chrome,
-    render_theme_toggle,
 )
 from mlblib.util import game_time_et, game_url, parse_iso_date, today_iso  # noqa: E402
 
@@ -30,12 +29,11 @@ render_nav("Home")
 
 st.markdown(
     '<div class="dv-brand">Diamond<span class="accent">Value</span></div>'
-    '<div class="dv-tagline">Per-game player projections for every MLB slate. '
-    "Every number is an expected value, not a prediction of what will happen."
-    "</div>",
+    '<div class="dv-tagline">Per-game projections for every MLB slate</div>'
+    '<div class="dv-note" style="margin-bottom:0.8rem">Every number is an '
+    "expected value, not a prediction of what will happen.</div>",
     unsafe_allow_html=True,
 )
-render_theme_toggle()
 
 
 # ── Date picker: seed once from ?date=, mirror changes back to the URL ───────

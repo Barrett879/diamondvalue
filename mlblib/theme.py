@@ -1,10 +1,10 @@
 """Theme tokens, page chrome, nav, and footer for DiamondValue.
 
-Ported from HoopsValue's utils.py theme system and trimmed to this project.
-All colors flow from CSS custom-property tokens (var(--panel), var(--fg-1..6),
-accents) so every page follows the light/dark flip. inject_theme() emits the
-dark base plus a light override when light is active; the chosen theme persists
-across full-reload page navigations via the ?theme= URL param.
+The visual system is HoopsValue's, ported wholesale (Barrett's NBA site at
+nba-value-app): the same surface/text/accent tokens in dark and light, the
+same Space Grotesk + Manrope self-hosted webfonts, the fixed pill nav with the
+red active state, and the pinned theme toggle. Only the wordmark text and the
+handful of baseball-specific components (game cards, badges) are new.
 
 SENTINEL is defined here ONCE and is the only em dash allowed in string
 literals across the codebase (spec rule 1); it renders in table cells for
@@ -18,7 +18,7 @@ import streamlit as st
 SENTINEL = "—"
 
 # Ship light by default (config.toml base="light" matches, so iframe components
-# render light); dark is opt-in via the nav toggle.
+# render light); dark is opt-in via the pinned toggle, persisted via ?theme=.
 THEME_DEFAULT_DARK = False
 
 # Nav pages: (label, url). Home is rendered separately.
@@ -28,39 +28,49 @@ _NAV_PAGES = [
     ("About", "/About"),
 ]
 
+# ── Tokens: HoopsValue's exact palette ───────────────────────────────────────
 THEME_BASE_CSS = """
 <style>
     :root {
-        --app-bg:      #0a0f14;
-        --bg-base:     #0a0f14;
-        --bg-nav:      #080b0e;
-        --panel:       rgba(18, 26, 34, 0.60);
-        --panel-solid: #12181f;
-        --panel-2:     #16202b;
-        --panel-hover: rgba(28, 40, 52, 0.9);
-        --panel-line:  rgba(90, 110, 125, 0.35);
+        /* surfaces */
+        --app-bg:      #0a0a14;
+        --bg-base:     #0a0a14;
+        --bg-nav:      #0a0a0a;
+        --panel:       rgba(20, 20, 42, 0.55);
+        --panel-solid: #15171d;
+        --panel-2:     #1a1a2e;
+        --panel-hover: rgba(30, 30, 56, 0.85);
+        --panel-line:  rgba(80, 80, 110, 0.35);
         --hairline:    rgba(255, 255, 255, 0.08);
-        --nav-border:  #1c2630;
-        --nav-divider: #2a3742;
-        --tint-good:   #12281c;
-        --tint-bad:    #2a1618;
-        --tint-even:   #16202b;
+        --hairline-soft: rgba(255, 255, 255, 0.04);
+        --nav-border:  #222;
+        --nav-divider: #333;
+        /* tinted value-card surfaces */
+        --tint-good:   #1a2e1a;
+        --tint-bad:    #2e1a1a;
+        --tint-even:   #1a1a2e;
+        /* text ramp */
         --fg-1: #ffffff;
-        --fg-2: #cdd6dd;
-        --fg-3: #9fb0ba;
-        --fg-4: #7f8f99;
-        --fg-5: #6c7a83;
-        --fg-6: #5a666e;
-        /* Ballpark-grass + infield-dirt accents */
-        --accent-teal: #17b890;   /* primary accent (outfield green)   */
-        --accent-red:  #d1495b;
+        --fg-2: #cdcdd5;
+        --fg-3: #aaaaaa;
+        --fg-4: #8a8a93;
+        --fg-5: #777777;
+        --fg-6: #666666;
+        /* brand accents */
+        --accent-red:  #e63946;
+        --accent-teal: #16d4c1;
         --value-good:  #2ecc71;
-        --value-bad:   #e2604f;
-        --gold:        #e0a63c;    /* base-path clay */
-        --blue:        #3d9bd6;
-        --amber:       #e0a63c;    /* caveat / model chips */
-        --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.38);
-        --row-tint:    rgba(255, 255, 255, 0.025);
+        --value-bad:   #e74c3c;
+        --gold:        #f1c40f;
+        --blue:        #3498db;
+        --orange:      #f39c12;
+        --purple:      #9b59b6;
+        --sky:         #7ec8e8;
+        --amber:       #f0b35b;
+        /* elevation + table polish */
+        --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.35);
+        --row-tint: rgba(255, 255, 255, 0.025);
+        --bar-tint: rgba(22, 212, 193, 0.16);
     }
     html, body, .stApp { background: var(--app-bg) !important; }
     .stApp, body { color: var(--fg-2); }
@@ -115,64 +125,146 @@ THEME_BASE_CSS = """
 THEME_LIGHT_CSS = """
 <style>
     :root {
-        --app-bg:      linear-gradient(180deg, #fbfcfd 0%, #eef2f0 100%);
-        --bg-base:     #f4f7f5;
+        --app-bg:      linear-gradient(180deg, #fbfcfd 0%, #eef1f4 100%);
+        --bg-base:     #f4f6f8;
         --bg-nav:      #ffffff;
         --panel:       #ffffff;
         --panel-solid: #ffffff;
-        --panel-2:     #eef2f0;
-        --panel-hover: #f0f4f2;
-        --panel-line:  #e0e6e2;
-        --hairline:    rgba(20, 30, 24, 0.10);
-        --nav-border:  #e0e6e2;
-        --nav-divider: #c7d0ca;
-        --tint-good:   #e9f8ef;
-        --tint-bad:    #fceceb;
-        --tint-even:   #eef4f0;
-        --fg-1: #10241a;
-        --fg-2: #33413a;
-        --fg-3: #55625b;
-        --fg-4: #6e7a73;
-        --fg-5: #97a19a;
-        --fg-6: #b0b9b3;
-        --accent-teal: #0e9e79;
+        --panel-2:     #eef1f4;
+        --panel-hover: #f1f3f6;
+        --panel-line:  #e3e6eb;
+        --hairline:    rgba(20, 22, 40, 0.10);
+        --hairline-soft: rgba(20, 22, 40, 0.05);
+        --nav-border:  #e3e6eb;
+        --nav-divider: #c9ccd3;
+        --tint-good:   #eafaf1;
+        --tint-bad:    #fdeceb;
+        --tint-even:   #eef3f8;
+        --fg-1: #14142a;
+        --fg-2: #3a3d48;
+        --fg-3: #585c68;
+        --fg-4: #71757f;
+        --fg-5: #9aa0ab;
+        --fg-6: #b3b8c2;
+        --accent-teal: #0fae9d;
         --value-good:  #16a34a;
-        --value-bad:   #d1402f;
+        --value-bad:   #dc3a2c;
         --gold:        #9a6a00;
         --amber:       #a8730a;
+        --orange:      #b45f06;
+        --purple:      #7d3fa8;
         --blue:        #2471a3;
-        --shadow-card: 0 1px 2px rgba(20,30,24,.06), 0 4px 14px rgba(20,30,24,.07);
-        --row-tint:    rgba(20, 30, 24, 0.028);
+        --sky:         #146c94;
+        --shadow-card: 0 1px 2px rgba(20,22,40,.06), 0 4px 14px rgba(20,22,40,.07);
+        --row-tint: rgba(20, 22, 40, 0.028);
+        --bar-tint: rgba(15, 174, 157, 0.15);
     }
 </style>
 """
 
+# ── Fonts + shared chrome (HoopsValue's Space Grotesk / Manrope system) ──────
 COMMON_CSS = """
 <style>
-    .block-container { padding-top: 2.2rem; max-width: 1180px; }
-    #MainMenu, header[data-testid="stHeader"] { visibility: hidden; }
-    /* We use the custom top nav; hide Streamlit's default multipage sidebar. */
-    [data-testid="stSidebarNav"], [data-testid="stSidebar"] { display: none; }
-    [data-testid="stSidebarCollapsedControl"] { display: none; }
+    @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:500;font-display:swap;
+      src:url('/app/static/fonts/space-grotesk-500.woff2') format('woff2');}
+    @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:600;font-display:swap;
+      src:url('/app/static/fonts/space-grotesk-600.woff2') format('woff2');}
+    @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:700;font-display:swap;
+      src:url('/app/static/fonts/space-grotesk-700.woff2') format('woff2');}
+    @font-face{font-family:'Manrope';font-style:normal;font-weight:500;font-display:swap;
+      src:url('/app/static/fonts/manrope-500.woff2') format('woff2');}
+    @font-face{font-family:'Manrope';font-style:normal;font-weight:600;font-display:swap;
+      src:url('/app/static/fonts/manrope-600.woff2') format('woff2');}
+    @font-face{font-family:'Manrope';font-style:normal;font-weight:700;font-display:swap;
+      src:url('/app/static/fonts/manrope-700.woff2') format('woff2');}
+
+    html, body, .stApp, [data-testid="stMarkdownContainer"] p,
+    [data-testid="stWidgetLabel"], button, input {
+        font-family: 'Manrope', -apple-system, sans-serif;
+    }
+    [data-testid="stHeading"] h1, [data-testid="stHeading"] h2,
+    [data-testid="stHeading"] h3, .dv-brand, .dv-game-match {
+        font-family: 'Space Grotesk', 'Manrope', sans-serif;
+    }
+
+    /* Clear the fixed nav bar */
+    .block-container { padding-top: 4.4rem; max-width: 1180px; }
+    #MainMenu, header[data-testid="stHeader"], footer { visibility: hidden; }
+    [data-testid="stToolbar"]        { display: none !important; }
+    [data-testid="stDecoration"]     { display: none !important; }
+    [data-testid="stStatusWidget"]   { display: none !important; }
+    [data-testid="stAppViewerBadge"] { display: none !important; }
+    [data-testid="stSidebarNav"], [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+
+    /* Fixed top nav bar: HoopsValue's pill nav, red active state */
     .top-nav {
-        display: flex; align-items: center; gap: 0.15rem; flex-wrap: wrap;
-        padding: 0.2rem 0 0.9rem; margin-bottom: 0.8rem;
-        border-bottom: 1px solid var(--nav-border); font-size: 0.94rem;
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0 1.5rem;
+        padding-right: 3.5rem;
+        height: 3rem;
+        background: var(--bg-nav);
+        border-bottom: 1px solid var(--nav-border);
+        flex-wrap: nowrap;
     }
     .top-nav a {
-        color: var(--fg-3); text-decoration: none; padding: 0.2rem 0.6rem;
-        border-radius: 6px; font-weight: 500;
+        text-decoration: none;
+        padding: 0.3rem 0.85rem;
+        border-radius: 20px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--fg-3);
+        border: 1px solid transparent;
+        transition: all 0.15s;
+        white-space: nowrap;
     }
-    .top-nav a:hover { color: var(--fg-1); background: var(--panel-hover); }
-    .top-nav a.active { color: var(--accent-teal); font-weight: 700; }
-    .top-nav a.home-link { color: var(--fg-2); font-weight: 700; }
-    .top-nav .divider { color: var(--nav-divider); margin: 0 0.3rem; }
+    .top-nav a:hover { border-color: var(--accent-red); color: var(--fg-1); text-decoration: none; }
+    .top-nav a.active { background: var(--accent-red); border-color: var(--accent-red); color: #fff; }
+    .top-nav .home-link {
+        color: var(--fg-6);
+        font-size: 0.82rem;
+        font-weight: 500;
+        padding: 0.3rem 0.7rem;
+        margin-right: 0.25rem;
+        border: none;
+    }
+    .top-nav .home-link:hover { color: var(--fg-1); border: none; }
+    .top-nav .divider { color: var(--nav-divider); font-size: 0.75rem; margin: 0 0.1rem; user-select: none; }
+    @media (max-width: 760px) {
+        .top-nav { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding-right: 4rem; }
+        .top-nav::-webkit-scrollbar { display: none; }
+        .top-nav::after { content: ""; flex: 0 0 8rem; }
+    }
+
+    /* Pinned theme toggle (top-right, inside the nav bar row) */
+    .st-key-dv_theme_toggle {
+        position: fixed;
+        top: 0.35rem; right: 0.9rem;
+        z-index: 10000;
+        width: auto !important;
+    }
+    .st-key-dv_theme_toggle button {
+        padding: 0.15rem 0.7rem !important;
+        font-size: 0.78rem !important;
+        font-weight: 600 !important;
+        border-radius: 20px !important;
+    }
+
+    /* Brand + hero */
     .dv-brand {
-        font-size: 1.9rem; font-weight: 800; letter-spacing: -0.02em;
+        font-size: 2.1rem; font-weight: 700; letter-spacing: -0.02em;
         color: var(--fg-1); margin: 0 0 0.1rem;
     }
     .dv-brand .accent { color: var(--accent-teal); }
-    .dv-tagline { color: var(--fg-4); font-size: 0.95rem; margin-bottom: 0.6rem; }
+    .dv-tagline {
+        color: var(--fg-4); font-size: 0.82rem; margin-bottom: 0.6rem;
+        font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+    }
     .dv-badge {
         display: inline-block; font-size: 0.72rem; font-weight: 700;
         padding: 0.1rem 0.5rem; border-radius: 999px; letter-spacing: 0.02em;
@@ -181,7 +273,8 @@ COMMON_CSS = """
     .dv-badge.confirmed { background: var(--tint-good); color: var(--value-good); }
     .dv-badge.projected { background: var(--tint-even); color: var(--amber); }
     .dv-note { color: var(--fg-4); font-size: 0.85rem; }
-    /* Clickable game cards on the slate */
+
+    /* Clickable game cards */
     a.dv-game-card {
         display: flex; align-items: center; justify-content: space-between;
         gap: 1rem; flex-wrap: wrap;
@@ -192,7 +285,7 @@ COMMON_CSS = """
     }
     a.dv-game-card:hover { border-color: var(--accent-teal); transform: translateY(-1px); }
     .dv-game-match { font-size: 1.05rem; font-weight: 700; color: var(--fg-1); }
-    .dv-game-match .at { color: var(--fg-4); font-weight: 500; margin: 0 0.3rem; }
+    .dv-game-match .at { color: var(--accent-teal); font-weight: 500; margin: 0 0.3rem; }
     .dv-game-right { display: flex; align-items: center; gap: 0.9rem; }
     .dv-game-time { color: var(--fg-3); font-size: 0.9rem; }
     .dv-game-arrow { color: var(--accent-teal); font-weight: 700; }
@@ -201,12 +294,16 @@ COMMON_CSS = """
         font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem;
     }
     a.dv-back:hover { filter: brightness(1.1); }
-    .dv-footer {
-        margin-top: 3.5rem; padding-top: 1.3rem; font-size: 0.82rem;
-        border-top: 1px solid var(--panel-line); color: var(--fg-5);
-        text-align: center; line-height: 1.5;
-    }
-    .dv-footer a { color: var(--fg-3); }
+
+    /* Footer: HoopsValue's layout adapted */
+    .dv-footer { margin-top: 3.5rem; padding-top: 1.4rem; font-size: 0.85rem; }
+    .dv-foot-disc { text-align: center; color: var(--fg-5); font-size: 0.78rem;
+        line-height: 1.45; max-width: 760px; margin: 0 auto 1.2rem; }
+    .dv-foot-rule { border-top: 1px solid var(--panel-line); margin: 0 0 1rem; }
+    .dv-foot-bottom { display: flex; justify-content: space-between; align-items: center;
+        flex-wrap: wrap; gap: 0.5rem 1.1rem; color: var(--fg-5); }
+    .dv-foot-bottom a { color: var(--fg-3); text-decoration: none; }
+    .dv-foot-bottom a:hover { color: var(--fg-1); }
 </style>
 """
 
@@ -238,7 +335,7 @@ def render_theme_toggle() -> bool:
         st.query_params["theme"] = "dark" if new_dark else "light"
 
     dark = st.session_state.get("theme_dark", THEME_DEFAULT_DARK)
-    st.button("Light mode" if dark else "Dark mode", key="theme_toggle_btn",
+    st.button("Light" if dark else "Dark", key="theme_toggle_btn",
               on_click=_flip, help="Toggle light/dark")
     return st.session_state.get("theme_dark", THEME_DEFAULT_DARK)
 
@@ -252,7 +349,8 @@ def render_page_chrome() -> None:
 
 
 def render_nav(current: str) -> None:
-    """Top nav bar. `current` matches a label in _NAV_PAGES (or "Home").
+    """Fixed top nav bar plus the pinned theme toggle. `current` matches a
+    label in _NAV_PAGES (or "Home").
 
     Links use target="_self" (the default), NOT "_top": Streamlit Community
     Cloud serves the app inside an iframe, and "_top" would navigate the outer
@@ -260,12 +358,17 @@ def render_nav(current: str) -> None:
     "_self" navigates the app's own frame, which works whether the app is
     iframed (Streamlit Cloud) or served directly (local/Render).
     """
-    links = '<a class="home-link" href="/" target="_self">Home</a>'
+    home_cls = "active" if current == "Home" else ""
+    links = f'<a class="home-link {home_cls}" href="/" target="_self">DiamondValue</a>'
     links += '<span class="divider">|</span>'
     for label, url in _NAV_PAGES:
         cls = "active" if label == current else ""
         links += f'<a class="{cls}" href="{url}" target="_self">{label}</a>'
     st.markdown(f'<div class="top-nav">{links}</div>', unsafe_allow_html=True)
+    # Pinned top-right toggle, on every page (the HoopsValue pattern: a keyed
+    # container that COMMON_CSS position:fixes into the nav row).
+    with st.container(key="dv_theme_toggle"):
+        render_theme_toggle()
 
 
 def render_footer() -> None:
@@ -277,14 +380,16 @@ def render_footer() -> None:
     year = _dt.date.today().year
     html = (
         '<div class="dv-footer">'
-        "Statistics data via MLB Stats API. "
+        '<div class="dv-foot-disc">Statistics data via MLB Stats API. '
         f"Copyright {year} MLB Advanced Media, L.P. Use of any content "
         "acknowledges agreement to the terms at "
         '<a href="http://gdx.mlb.com/components/copyright.txt" target="_blank" '
-        'rel="noopener">gdx.mlb.com/components/copyright.txt</a>.<br>'
-        "DiamondValue is an independent, non-commercial project and is not "
-        "affiliated with or endorsed by Major League Baseball."
-        "</div>"
+        'rel="noopener">gdx.mlb.com/components/copyright.txt</a>.</div>'
+        '<div class="dv-foot-rule"></div>'
+        '<div class="dv-foot-bottom">'
+        f"<div>&copy; {year} DiamondValue. Every number is an expected value.</div>"
+        '<div><a href="/About" target="_self">About</a></div>'
+        "</div></div>"
     )
     st.markdown(html, unsafe_allow_html=True)
 
@@ -294,15 +399,15 @@ def theme_fig(fig):
     vars). Call inline at the plot site.
     """
     dark = st.session_state.get("theme_dark", THEME_DEFAULT_DARK)
-    axis = "#cdd6dd" if dark else "#33413a"
-    grid = "rgba(255,255,255,0.08)" if dark else "rgba(20,30,24,0.10)"
+    axis = "#cdcdd5" if dark else "#3a3d48"
+    grid = "rgba(255,255,255,0.08)" if dark else "rgba(20,22,40,0.10)"
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color=axis),
+        font=dict(color=axis, family="Manrope, sans-serif"),
         hoverlabel=dict(
-            bgcolor="#12181f" if dark else "#ffffff",
-            font=dict(color="#e8eef0" if dark else "#10241a"),
+            bgcolor="#1a1a2e" if dark else "#ffffff",
+            font=dict(color="#e8e8f0" if dark else "#14142a"),
         ),
     )
     fig.update_xaxes(gridcolor=grid, zerolinecolor=grid)
