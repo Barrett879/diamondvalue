@@ -179,3 +179,34 @@ pin down, so Barrett can audit later. Newest at the bottom.
   domes fixed at 72F/no wind; retractable roofs dampen wind by the venue's
   historical closed share; HP ump via GUMBO once a game hits Pre-Game
   (morning runs carry NaN, afternoon runs populate).
+
+## Tier-3: training techniques (2026-07-11)
+
+- Trainer upgraded (mlblib/train.py): optional recency sample-weight decay
+  (w *= 0.5^(days_ago/half_life)) and per-target monotonic_cst maps
+  (conservative known-direction signs only, mlblib/model.py MONOTONIC_MAPS).
+  Per-target grants live in TRAIN_POLICY, consumed via train_kwargs() by the
+  production trainer, the validator, and future experiment baselines.
+- SHIPPED after 2024 ablation + 2025 confirmation:
+  PA + recency-300d (dev -1.37%/-1.10%, dose-response: 300d beat 550d,
+  exactly what a role-driven stat should show; PA is the exposure input to
+  every batter counting stat); monotonic for p_outs (-0.47% on 2025, this
+  target's FIRST win in seven rounds), p_K (FIFTH stacked gain), p_BB, b3.
+- CAUGHT: p_BF recency was the largest mirage yet (2024 -0.42% -> 2025
+  +1.82%); p_ER is now 0-for-4 across rounds; batter-PA monotonic was
+  catastrophic on 2024 (+4.4%, the slot constraint fights pinch-hit rows);
+  HBP monotonic failed confirmation; structural-PA identity feature
+  (pa_struct) rejected outright: the trees had already learned the closed
+  form. Recency HURTS most pitcher rate stats (p_BB +1.1-1.6%) -- pitcher
+  skill is stable; forgetting old data just adds variance.
+- Deferred to a future round: hurdle models for rare counts, GLM anchor
+  stacking, isotonic recalibration, per-target hyperparameter tuning, the
+  manager hook model.
+- POST-SHIP AUDIT (same day): the technique harness loaded a thinner 2025
+  history (no 2024 season) than the real validator, so its p_outs/p_K mono
+  "confirmations" did not transfer (+0.10%/+0.06% under full history) and
+  were REVERTED before push; PA recency (-1.09%), b3 mono (-0.28%), and
+  p_BB mono (dev+MAE better everywhere) survived. Harness fixed to load
+  validator-identical history. Lesson: a confirmation harness must match the
+  production configuration EXACTLY or its verdicts are about a different
+  model.

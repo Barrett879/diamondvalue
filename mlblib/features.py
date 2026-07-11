@@ -508,6 +508,14 @@ def _assemble_batter_feature_cols(df, league, ctx, universe,
 
     # Own-team offense through the prior day.
     f["own_team_r_pa"] = df.get("own_team_r_pa", pd.Series(np.nan, index=df.index)).values
+    # Structural expected-PA identity (tier-3 candidate): the published
+    # slot/team-offense closed form, ~4.65 PA leadoff minus 0.11 per slot,
+    # adjusted for team run environment and the home team's skipped 9th.
+    _slot = df["slot"].astype(float)
+    _rpa = pd.to_numeric(df.get("own_team_r_pa"), errors="coerce")
+    f["pa_struct"] = (4.65 - 0.11 * (_slot - 1)
+                      + 5.0 * (_rpa - 0.118).fillna(0)
+                      - 0.06 * df["isHome"].astype(float)).values
     f["own_team_obp"] = df.get("own_team_obp", pd.Series(np.nan, index=df.index)).values
     # Round-4 candidate blocks (per-target policy decides who trains on them):
     # own-team last-30 form, and the opposing bullpen's quality.

@@ -60,7 +60,8 @@ def _train_role(role: str, hist, ctx, uni):
     logger.warning("[%s] %d feature rows, %d feature cols", role, len(feat), len(fcols))
     for target, spec in targets.items():
         art = T.fit_target(feat, counts, target, spec,
-                           M.target_feature_cols(target, fcols))
+                           M.target_feature_cols(target, fcols),
+                           **M.train_kwargs(target))
         out = Path(__file__).resolve().parent.parent / "models" / f"{target}_histgb_{M.MODEL_VERSION}.joblib"
         joblib.dump(art, out)
         logger.warning("  saved %s (%d rows)", out.name, art["n_rows"])

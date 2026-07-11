@@ -139,7 +139,8 @@ def evaluate_role(role, history, ctx, uni) -> tuple[pd.DataFrame, dict]:
     logger.warning("[%s] train rows %d, test rows %d", role, len(feat_train), len(feat_test))
 
     artifacts = {t: T.fit_target(feat_train, counts, t, spec,
-                                 M.target_feature_cols(t, fcols))
+                                 M.target_feature_cols(t, fcols),
+                                 **M.train_kwargs(t))
                  for t, spec in targets.items()}
 
     base, prefix, denom, league = _asof_baseline_frame(history, role)

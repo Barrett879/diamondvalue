@@ -106,9 +106,63 @@ FEATURE_BLOCKS = {
     "weather_pit": {"cols": ["env_temp", "env_wind_out", "env_roof"],
                     "targets": {"p_H", "p_HR"}},
     "ump_bat": {"cols": ["ump_k_delta", "ump_bb_delta"], "targets": set()},
+    # Tier-3 candidate: structural expected-PA identity feature.
+    "pa_struct": {"cols": ["pa_struct"], "targets": set()},
     "ump_pit": {"cols": ["ump_k_delta", "ump_bb_delta"],
                 "targets": {"p_BB", "p_K"}},
 }
+
+
+# ── Tier-3 training techniques (per-target, gauntlet-decided) ────────────────
+# Conservative known-direction monotonic maps: only signs that are a priori
+# certain. Applied per target when TRAIN_POLICY grants "monotonic". Columns
+# absent from a target's feature list are filtered at fit time.
+MONOTONIC_MAPS = {
+    "PA": {"slot": -1, "marcel_PApg": 1},
+    "b1": {"rate_b1": 1}, "b2": {"rate_b2": 1}, "b3": {"rate_b3": 1},
+    "HR": {"rate_HR": 1, "marcel_HR": 1, "pf_hr": 1},
+    "BB": {"rate_BB": 1, "marcel_BB": 1, "opp_sp_bb_rate": 1},
+    "HBP": {"rate_HBP": 1},
+    "SO": {"rate_SO": 1, "marcel_SO": 1, "opp_sp_k_rate": 1},
+    "R": {"own_team_r_pa": 1}, "RBI": {"own_team_r_pa": 1},
+    "SB": {"sc_sprint": 1},
+    "p_outs": {"marcel_BFpg": 1}, "p_BF": {"marcel_BFpg": 1},
+    "p_pitches": {"marcel_BFpg": 1},
+    "p_K": {"rate_p_K": 1, "opp_team_k": 1, "opp_lineup_xwhiff": 1,
+            "ump_k_delta": 1, "opp_form_k": 1},
+    "p_BB": {"rate_p_BB": 1, "ump_bb_delta": 1},
+    "p_H": {"rate_p_H": 1, "opp_team_obp": 1},
+    "p_HR": {"rate_p_HR": 1, "pf_hr": 1, "env_temp": 1, "env_wind_out": 1},
+}
+
+# Per-target training-technique grants (recency half-life in days, monotonic
+# on/off), decided by the tier-3 gauntlet (2024 ablation + 2025 confirmation):
+# PA recency-300 replicated at -1.37%/-1.10% dev (role-driven stat, short
+# memory wins; PA feeds every batter counting stat); monotonic constraints
+# confirmed for p_outs (-0.47%, its first-ever win), p_K (fifth stacked gain),
+# p_BB, and b3. Caught: p_BF recency was a full mirage (-0.42% -> +1.82%);
+# p_ER is now 0-for-4; batter-PA monotonic was catastrophic (+4.4%).
+# FULL-HISTORY AUDIT (see decisions.md): the technique harness loaded a
+# thinner 2025 history than the real validator, and its p_outs/p_K monotonic
+# "confirmations" reversed under the true configuration (+0.10%/+0.06%) --
+# reverted. PA recency (-1.09%), b3 mono (-0.28%), p_BB mono (dev and MAE
+# both better in every configuration) survived the audit.
+TRAIN_POLICY: dict = {
+    "PA": {"recency_half_life": 300.0},
+    "b3": {"monotonic": True},
+    "p_BB": {"monotonic": True},
+}
+
+
+def train_kwargs(target: str) -> dict:
+    """fit_target kwargs for one target under the shipped technique policy."""
+    pol = TRAIN_POLICY.get(target, {})
+    out = {}
+    if pol.get("recency_half_life"):
+        out["recency_half_life"] = pol["recency_half_life"]
+    if pol.get("monotonic"):
+        out["monotonic"] = MONOTONIC_MAPS.get(target, {})
+    return out
 
 
 def target_feature_cols(target: str, all_cols: list[str]) -> list[str]:

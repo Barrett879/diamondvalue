@@ -37,10 +37,10 @@ def _counts_frame(history: pd.DataFrame, role: str) -> pd.DataFrame:
     """
     if role == "bat":
         m = history[history["played"] & history["is_batter"]]
-        cols = ["personId", "gamePk"] + F.BAT_COUNTS
+        cols = ["personId", "gamePk", "officialDate"] + F.BAT_COUNTS
     else:
         m = history[history["played"] & history["is_pitcher"] & history["is_sp"]]
-        cols = ["personId", "gamePk"] + F.PIT_COUNTS
+        cols = ["personId", "gamePk", "officialDate"] + F.PIT_COUNTS
     return m[cols].drop_duplicates(subset=["personId", "gamePk"])
 
 
@@ -60,14 +60,35 @@ def target_yw(counts: pd.DataFrame, target: str, spec: dict) -> pd.DataFrame:
 
 
 def fit_target(feat_train: pd.DataFrame, counts: pd.DataFrame, target: str,
-               spec: dict, feature_cols: list[str]) -> dict:
-    """Fit one HistGBR for a target and return a serializable artifact dict."""
+               spec: dict, feature_cols: list[str],
+               recency_half_life: float | None = None,
+               monotonic: dict | None = None) -> dict:
+    """Fit one HistGBR for a target and return a serializable artifact dict.
+
+    recency_half_life: optional exponential day-decay of sample weights,
+      w *= 0.5^(days_before_train_end / half_life). Composes with the Poisson
+      exposure weights.
+    monotonic: optional {feature_name: +1|-1} map passed to HistGB's
+      monotonic_cst (variance reduction on known-direction features).
+    """
     yw = target_yw(counts, target, spec)
     data = feat_train.merge(yw, on=["personId", "gamePk"], how="inner")
     X = data.reindex(columns=feature_cols)
     y = data["y"].values
-    w = data["w"].values
-    est = HistGradientBoostingRegressor(**HGB_PARAMS)
+    w = data["w"].values.astype(float)
+    if recency_half_life:
+        dates = counts[["personId", "gamePk", "officialDate"]]
+        data2 = data[["personId", "gamePk"]].merge(dates, on=["personId", "gamePk"],
+                                                   how="left")
+        d = pd.to_datetime(data2["officialDate"], errors="coerce")
+        days_ago = (d.max() - d).dt.days.fillna(0).values
+        w = w * np.power(0.5, days_ago / float(recency_half_life))
+    params = dict(HGB_PARAMS)
+    if monotonic:
+        cst = {c: v for c, v in monotonic.items() if c in feature_cols}
+        if cst:
+            params["monotonic_cst"] = cst
+    est = HistGradientBoostingRegressor(**params)
     est.fit(X, y, sample_weight=w)
     return {
         "model": est,
@@ -77,6 +98,8 @@ def fit_target(feat_train: pd.DataFrame, counts: pd.DataFrame, target: str,
         "kind": spec["kind"],
         "loss": "poisson",
         "n_rows": int(len(data)),
+        "recency_half_life": recency_half_life,
+        "monotonic": monotonic or {},
         "MODEL_VERSION": M.MODEL_VERSION,
     }
 
