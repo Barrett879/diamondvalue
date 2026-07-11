@@ -80,6 +80,23 @@ FEATURE_BLOCKS = {
                 "targets": set()},
     "teamform": {"cols": ["own_form_r_pa", "own_form_obp"], "targets": set()},
     "oppform": {"cols": ["opp_form_k", "opp_form_obp"], "targets": {"p_K"}},
+    # Tier-1 blocks (2026-07-11). 2024 ablation: batter-level arsenal matchup
+    # (mu_xwhiff) showed nothing above the noise floor for ANY batter target --
+    # rejected -- while the LINEUP-AGGREGATED version was the round's strongest
+    # block for pitchers (averaging 9 batters cancels single-batter noise).
+    # Pitcher discipline helped workload targets but HURT p_K (+0.36%,
+    # double-counts the Marcel K prior). Sets below are the 2024 survivors;
+    # the 2025 confirmation prunes non-replicators.
+    # 2025 confirmation pruned hard: p_K (-0.32% dev, stacking with oppform)
+    # and p_H (-0.14%) replicated and ship; p_ER produced its SECOND mirage in
+    # two rounds, p_HR/p_outs/p_pitches/HBP all failed to replicate. Batter-
+    # level matchup and both discipline blocks ship nowhere (columns still
+    # computed for future rounds).
+    "arsenal_bat": {"cols": ["mu_xwhiff"], "targets": set()},
+    "disc_bat": {"cols": ["bat_whiff", "bat_chase", "bat_izcon",
+                          "sp_whiff", "sp_fstrike"], "targets": set()},
+    "arsenal_pit": {"cols": ["opp_lineup_xwhiff"], "targets": {"p_K", "p_H"}},
+    "disc_pit": {"cols": ["p_whiff", "p_fstrike", "p_chase"], "targets": set()},
 }
 
 

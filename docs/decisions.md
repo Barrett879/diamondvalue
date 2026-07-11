@@ -133,3 +133,22 @@ pin down, so Barrett can audit later. Newest at the bottom.
   its own real game as a "prior" appearance (rest_days ~ 0, leaked rolling
   stats), which drove pitcher IP predictions down to ~3. With the filter,
   starter IP predictions land at a realistic ~5.
+
+## Tier-1 Phase A: arsenal matchup + plate discipline (2026-07-11)
+
+- Four new Savant tables per year 2018-2026 (build_arsenal_tables.py):
+  arsenal_pit/arsenal_bat (per pitch type: usage, whiff, k%, put_away) and
+  disc_pit/disc_bat (8 plate-discipline keys, all verified populating).
+- KEY RESULT: the batter-level arsenal matchup (mu_xwhiff, batter whiff vs
+  the starter's mix) showed NOTHING above noise for any batter target, but
+  the LINEUP-AGGREGATED version (mean expected whiff of the 9 starters he
+  faces) was the strongest pitcher block of the round. Averaging 9 batters
+  cancels the single-batter noise. SHIPPED for p_K (2024 dev -0.49%, 2025
+  -0.32%, stacks with round-4 oppform: p_K MAE 1.7798 -> 1.7763 -> 1.7733)
+  and p_H (2024 -0.10%, 2025 -0.14%).
+- FAILED 2025 confirmation: p_ER (SECOND ER mirage in two rounds), p_HR,
+  disc_pit workload keeps (p_outs/p_pitches regressed hard), disc_bat HBP
+  (targeted check: dev worse). Both discipline blocks and the batter-level
+  matchup ship nowhere; columns remain computed for future rounds.
+- Phase B (pitch-level TTO + fastball-velo trends) backfill running:
+  build_pitchlevel_backfill.py, 3-day chunks, 25k-row cap asserted.

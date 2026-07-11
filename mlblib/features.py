@@ -98,6 +98,10 @@ class Context:
         "evbat": "statcast_ev_bat",
         "evpit": "statcast_ev_pit",
         "sprint": "sprint_speed",
+        "discpit": "disc_pit",
+        "discbat": "disc_bat",
+        "arspit": "arsenal_pit",
+        "arsbat": "arsenal_bat",
     }
 
     def __init__(self, years: list[int]):
@@ -149,6 +153,52 @@ class Context:
         ref = ref.drop_duplicates(subset=["season", "player_id"])
         merged = key.merge(ref, on=["season", "player_id"], how="left").sort_values("_i")
         return pd.to_numeric(merged["_val"], errors="coerce").values
+
+    def arsenal_matchup(self, seasons, batter_ids, pitcher_ids) -> np.ndarray:
+        """Expected-whiff matchup: sum over the pitcher's Y-1 pitch mix of
+        (usage share x the batter's Y-1 whiff rate against that pitch type),
+        with the league-average whiff for a pitch type filling batter gaps.
+        The round's headline feature: 'this lineup chases sliders, this
+        starter is slider-heavy'. Returns NaN when the pitcher has no Y-1
+        arsenal data.
+        """
+        pit = self._statcast_all.get("arspit")
+        bat = self._statcast_all.get("arsbat")
+        n = len(seasons)
+        if pit is None or pit.empty or bat is None or bat.empty:
+            return np.full(n, np.nan)
+        years = sorted(self.statcast["arspit"].keys())
+        pyr = {s: max((y for y in years if y < s), default=None)
+               for s in pd.unique(seasons)}
+        key = pd.DataFrame({
+            "_i": np.arange(n),
+            "season": [pyr.get(s) for s in seasons],
+            "pid": pd.to_numeric(pd.Series(pitcher_ids), errors="coerce"),
+            "bid": pd.to_numeric(pd.Series(batter_ids), errors="coerce"),
+        })
+        # Pitcher usage shares per pitch type (Y-1 file).
+        p = pit[["season", "player_id", "pitch_type", "pitch_usage"]].rename(
+            columns={"player_id": "pid", "pitch_usage": "usage"})
+        expanded = key.merge(p, on=["season", "pid"], how="left")
+        # Batter whiff vs that pitch type, league fallback per (season, type).
+        b = bat[["season", "player_id", "pitch_type", "whiff_percent"]].rename(
+            columns={"player_id": "bid", "whiff_percent": "b_whiff"})
+        lg = (bat.assign(w=bat["whiff_percent"] * bat["pitches"])
+              .groupby(["season", "pitch_type"])
+              .apply(lambda g: g["w"].sum() / max(g["pitches"].sum(), 1),
+                     include_groups=False)
+              .rename("lg_whiff").reset_index())
+        expanded = expanded.merge(b, on=["season", "bid", "pitch_type"], how="left")
+        expanded = expanded.merge(lg, on=["season", "pitch_type"], how="left")
+        expanded["eff_whiff"] = expanded["b_whiff"].fillna(expanded["lg_whiff"])
+        expanded["contrib"] = (expanded["usage"].astype(float) / 100.0
+                               * expanded["eff_whiff"].astype(float))
+        agg = expanded.groupby("_i").agg(mu=("contrib", "sum"),
+                                         got=("usage", "count"))
+        out = np.full(n, np.nan)
+        ok = agg[agg["got"] > 0]
+        out[ok.index.values] = ok["mu"].values
+        return out
 
     @staticmethod
     def _concat(table: dict) -> pd.DataFrame:
@@ -493,6 +543,16 @@ def _assemble_batter_feature_cols(df, league, ctx, universe,
         f["opp_sc_xwoba"] = ctx.statcast_lookup(seasons, opp_ids, "xpit", "est_woba")
         f["opp_sc_brl_pct"] = ctx.statcast_lookup(seasons, opp_ids, "evpit", "brl_percent")
 
+        # Tier-1 blocks (per-target policy decides who trains on them):
+        # the batter-vs-arsenal expected-whiff matchup, the batter's own
+        # plate-discipline profile, and the opposing starter's discipline.
+        f["mu_xwhiff"] = ctx.arsenal_matchup(seasons, pids, opp_ids)
+        f["bat_whiff"] = ctx.statcast_lookup(seasons, pids, "discbat", "whiff_percent")
+        f["bat_chase"] = ctx.statcast_lookup(seasons, pids, "discbat", "oz_swing_percent")
+        f["bat_izcon"] = ctx.statcast_lookup(seasons, pids, "discbat", "iz_contact_percent")
+        f["sp_whiff"] = ctx.statcast_lookup(seasons, opp_ids, "discpit", "whiff_percent")
+        f["sp_fstrike"] = ctx.statcast_lookup(seasons, opp_ids, "discpit", "f_strike_percent")
+
     # Age.
     if universe is not None:
         bmap = dict(zip(universe["personId"], universe["birthDate"]))
@@ -695,6 +755,23 @@ def compute_pitcher_features(history: pd.DataFrame, targets: pd.DataFrame | None
     team = _team_asof_table(history)
     combined = _join_team_asof(combined, team, id_col="oppTeamId", prefix="opp_")
 
+    # Lineup-aggregated arsenal matchup for TRAINING rows: the mean expected
+    # whiff of the nine batters who actually started against this pitcher
+    # (lineups are known pregame, so this is point-in-time). Inference rows may
+    # instead carry a pipeline-provided opp_lineup_xwhiff column computed from
+    # the day's posted/projected lineups; the assembly coalesces the two.
+    if ctx is not None:
+        lu = history[history["played"] & history["is_batter"]
+                     & history["is_starter_slot"] & history["oppStarterId"].notna()]
+        if not lu.empty:
+            mu = ctx.arsenal_matchup(lu["season"].values, lu["personId"].values,
+                                     lu["oppStarterId"].values)
+            agg = (lu[["gamePk", "oppStarterId"]].assign(_mu=mu)
+                   .groupby(["gamePk", "oppStarterId"])["_mu"].mean()
+                   .rename("opp_lineup_xwhiff_hist").reset_index()
+                   .rename(columns={"oppStarterId": "personId"}))
+            combined = combined.merge(agg, on=["gamePk", "personId"], how="left")
+
     out = combined[combined["_is_target"]].copy()
     return _assemble_pitcher_feature_cols(out, league, ctx, universe)
 
@@ -747,6 +824,15 @@ def _assemble_pitcher_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
         f["sc_xwoba_ag"] = ctx.statcast_lookup(seasons, pids, "xpit", "est_woba")
         f["sc_avg_ev_ag"] = ctx.statcast_lookup(seasons, pids, "evpit", "avg_hit_speed")
         f["sc_brl_pct_ag"] = ctx.statcast_lookup(seasons, pids, "evpit", "brl_percent")
+
+        # Tier-1 blocks: the pitcher's own Y-1 plate-discipline profile and the
+        # lineup-aggregated arsenal matchup (pipeline column wins at inference).
+        f["p_whiff"] = ctx.statcast_lookup(seasons, pids, "discpit", "whiff_percent")
+        f["p_fstrike"] = ctx.statcast_lookup(seasons, pids, "discpit", "f_strike_percent")
+        f["p_chase"] = ctx.statcast_lookup(seasons, pids, "discpit", "oz_swing_percent")
+        provided = pd.to_numeric(_series(df, "opp_lineup_xwhiff"), errors="coerce")
+        hist_mu = pd.to_numeric(_series(df, "opp_lineup_xwhiff_hist"), errors="coerce")
+        f["opp_lineup_xwhiff"] = provided.fillna(hist_mu).values
 
     if universe is not None:
         bmap = dict(zip(universe["personId"], universe["birthDate"]))

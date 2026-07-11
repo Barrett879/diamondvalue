@@ -190,6 +190,7 @@ def main(argv):
     pit_art = M.load_artifacts(list(M.PIT_TARGETS))
 
     out_rows = []
+    featb = None
     if not bat_t.empty:
         featb = F.compute_batter_features(history, targets=bat_t, ctx=ctx, universe=uni)
         predb = M.predict_batters(featb, bat_art)
@@ -200,6 +201,15 @@ def main(argv):
             on=["personId", "gamePk"], how="left")
         out_rows.append(merged)
     if not pit_t.empty:
+        # Lineup-aggregated arsenal matchup for today's starters: mean expected
+        # whiff of the (posted or projected) lineup they will face, from the
+        # batter feature frame computed above. Mirrors the training-side
+        # aggregation over historical starting lineups in features.py.
+        if featb is not None and "mu_xwhiff" in featb.columns:
+            lineup_ids = bat_t[~bat_t["is_bench"]][["personId", "gamePk"]]
+            mu = featb.merge(lineup_ids, on=["personId", "gamePk"])
+            agg = mu.groupby("gamePk")["mu_xwhiff"].mean()
+            pit_t = pit_t.assign(opp_lineup_xwhiff=pit_t["gamePk"].map(agg))
         featp = F.compute_pitcher_features(history, targets=pit_t, ctx=ctx, universe=uni)
         predp = M.predict_pitchers(featp, pit_art)
         merged = pit_t.merge(predp, on=["personId", "gamePk"], how="left")
