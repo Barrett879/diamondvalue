@@ -95,11 +95,36 @@ if update:
         st.warning("PrizePicks blocked the automated request (this is normal). "
                    "Paste the lines below instead.")
 
-# Reuse a previously pulled or pasted payload across reruns.
-payload = st.session_state.get("pp_payload") or fp.load_raw(date_iso)
+# Resolve the current lines from ANY source, in priority order: a live pull,
+# the pasted text (JSON or list), or the previously-saved file (sticky across
+# reloads). Rendering runs on every rerun, so clicking away from the paste box
+# OR clicking Compare both work -- no dead-end if Enter is pressed by mistake.
+def _current_lines():
+    payload = st.session_state.get("pp_payload") or fp.load_raw(date_iso)
+    if payload:
+        try:
+            return props.parse_prizepicks_json(payload)
+        except Exception:  # noqa: BLE001
+            pass
+    txt = (st.session_state.get("pp_paste") or "").strip()
+    if txt:
+        if txt[:1] in "{[":
+            try:
+                got = props.parse_prizepicks_json(txt)
+                if got is not None and not got.empty:
+                    return got
+            except Exception:  # noqa: BLE001
+                pass
+        got = props.parse_line_list(txt)
+        if got is not None and not got.empty:
+            return got
+    return props.load_lines(date_iso)  # sticky: a prior save for this date
 
-if payload:
-    _show(props.parse_prizepicks_json(payload))
+
+lines = _current_lines()
+have_lines = lines is not None and not lines.empty
+if have_lines:
+    _show(lines)
 
 # ── One-click grabber (bookmarklet) ─────────────────────────────────────────
 with st.expander("One-click grab (bookmarklet)", expanded=False):
@@ -124,29 +149,23 @@ with st.expander("One-click grab (bookmarklet)", expanded=False):
     st.code(BOOKMARKLET, language="javascript")
 
 # ── Paste fallback (the reliable path) ──────────────────────────────────────
-with st.expander("Paste lines (recommended)", expanded=payload is None):
+with st.expander("Paste lines (recommended)", expanded=not have_lines):
     st.markdown(
         "Open PrizePicks in your own browser, then either copy the JSON from "
         "`api.prizepicks.com/projections?league_id=2&per_page=250` and paste "
         "it below, **or** type a simple `Name, Stat, Line` list (one per row).")
-    txt = st.text_area("PrizePicks JSON or a Name, Stat, Line list", height=200,
-                       key="pp_paste", placeholder=(
-                           "Ketel Marte, Total Bases, 1.5\n"
-                           "Corbin Carroll, Hits, 0.5\n"
-                           "Zac Gallen, Pitcher Strikeouts, 6.5"))
-    if st.button("Compare pasted lines"):
-        stripped = (txt or "").strip()
-        lines = None
-        if stripped.startswith("{"):
-            try:
-                lines = props.parse_prizepicks_json(stripped)
-            except Exception:  # noqa: BLE001
-                st.error("That did not parse as PrizePicks JSON.")
-        if lines is None:
-            lines = props.parse_line_list(stripped)
-        if lines is None or lines.empty:
-            st.warning("Nothing to compare yet.")
-        else:
-            _show(lines)
+    st.text_area("PrizePicks JSON or a Name, Stat, Line list", height=200,
+                 key="pp_paste", placeholder=(
+                     "Ketel Marte, Total Bases, 1.5\n"
+                     "Corbin Carroll, Hits, 0.5\n"
+                     "Zac Gallen, Pitcher Strikeouts, 6.5"))
+    st.button("Compare pasted lines", type="primary")   # or just click outside the box
+    st.caption("Tip: after pasting, click **Compare** or click anywhere outside "
+               "the box. Pressing Enter alone just adds a new line. The "
+               "comparison appears above, and on each game's page under "
+               "**Model vs the board**.")
+    if st.session_state.get("pp_paste", "").strip() and not have_lines:
+        st.warning("That did not parse as PrizePicks JSON or a Name, Stat, Line "
+                   "list, or no players matched today's slate.")
 
 render_footer()
