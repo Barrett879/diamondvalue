@@ -17,8 +17,10 @@ import scripts.fetch_prizepicks as fp
 from mlblib import props, store
 
 # One-click grabber: runs in the user's OWN logged-in browser (where PrizePicks
-# is not Cloudflare-blocked), fetches every MLB projection, and copies a clean
-# "Name | Stat | Line" list to the clipboard ready to paste.
+# is not Cloudflare-blocked), auto-pages through EVERY MLB projection across all
+# stat types, and copies a clean "Name | Stat | Line | odds_type" list to the
+# clipboard ready to paste -- the whole board in one click. odds_type (standard/
+# demon/goblin) rides along so the paste keeps the Demon/Goblin distinction.
 BOOKMARKLET = (
     "javascript:(async()=>{try{let o=[],P=1;for(let p=1;p<=P&&p<=8;p++){"
     "let r=await fetch('https://api.prizepicks.com/projections?league_id=2"
@@ -30,11 +32,11 @@ BOOKMARKLET = (
     "i.attributes.name});(j.data||[]).forEach(d=>{let a=d.attributes||{},"
     "x=((d.relationships||{}).new_player||{}).data,m=x?n[x.id]:0;"
     "if(m&&a.line_score!=null&&a.stat_type)o.push(m+' | '+a.stat_type+' | '"
-    "+a.line_score)})}await navigator.clipboard.writeText(o.join(String."
-    "fromCharCode(10)));alert('Copied '+o.length+' PrizePicks MLB lines. "
-    "Paste them into DiamondValue.')}catch(e){alert('Could not fetch "
-    "PrizePicks ('+e+'). Open prizepicks.com in this tab first, then click "
-    "the bookmarklet.')}})();"
+    "+a.line_score+' | '+(a.odds_type||'standard'))})}await navigator."
+    "clipboard.writeText(o.join(String.fromCharCode(10)));alert('Copied '+"
+    "o.length+' PrizePicks MLB lines. Paste them into DiamondValue and click "
+    "Add.')}catch(e){alert('Could not fetch PrizePicks ('+e+'). Open "
+    "prizepicks.com in this tab first, then click the bookmarklet.')}})();"
 )
 
 
@@ -174,27 +176,60 @@ FEED_URL = ("https://api.prizepicks.com/projections?"
 
 
 def render_input(date_iso: str) -> None:
-    """The line-input controls. The reliable, all-browser path is: open the
-    PrizePicks feed in a new tab, copy the JSON, paste it. A best-effort live
-    pull and an optional bookmarklet are also offered. Persistence/comparison
-    is handled by resolve_and_persist + render_board; this only draws widgets."""
-    # Primary path -- works in Safari, Chrome, anywhere, no install.
+    """The line-input controls. The FAST path is the one-click grabber (copies
+    the whole board at once); a manual copy-paste and a best-effort live pull are
+    also offered. Persistence/comparison is handled by resolve_and_persist +
+    render_board; this only draws widgets."""
+    # ── Fastest: the one-click grabber (recommended). Runs in the user's own
+    #    logged-in browser and copies the WHOLE board (every stat) at once.
+    #    A bordered container, NOT an expander -- render_input is already inside
+    #    the "Add / update" expander and Streamlit forbids nesting expanders. ──
+    with st.container(border=True):
+        st.markdown("**Fastest: grab the whole board in one click** (recommended)")
+        st.markdown(
+            "The grabber runs in your own browser (where PrizePicks is not "
+            "blocked) and copies **every line across all stat tabs** in one "
+            "click, so you paste once instead of tab by tab.<br><br>"
+            "**Install once — Chrome (easiest):**<br>"
+            "1. Show the bookmarks bar (&#8984;&#8679;B).<br>"
+            "2. Drag the teal button below onto the **bookmarks bar** (not the "
+            "address bar).<br>"
+            "**Safari:** dragging turns into a search, so instead press "
+            "&#8984;D to bookmark any page, open **Bookmarks &rsaquo; Edit "
+            "Bookmarks**, and paste the code (shown under the button) into that "
+            "bookmark's **Address** field.<br><br>"
+            "**Each day:** open **prizepicks.com** (signed in), click the "
+            "bookmark, come back here, paste in the box, click **Add these "
+            "lines**. That is the whole board in one paste.",
+            unsafe_allow_html=True)
+        html = (
+            '<a href="' + BOOKMARKLET.replace('"', "&quot;") + '" '
+            'style="display:inline-block;padding:9px 18px;border-radius:20px;'
+            'background:#0fae9d;color:#fff;font:600 14px Manrope,sans-serif;'
+            'text-decoration:none;cursor:grab" '
+            'onclick="event.preventDefault()">Grab PrizePicks lines</a>'
+            '<div style="font:13px Manrope,sans-serif;color:#71757f;'
+            'margin-top:8px">Drag me to your bookmarks bar (not the search bar).'
+            "</div>")
+        components.html(html, height=70)
+        st.caption("Safari: copy this and paste it as the bookmark's Address:")
+        st.code(BOOKMARKLET, language="javascript")
+
+    # ── Manual alternative: paste the feed or a stat tab from the board. ──
     st.markdown(
-        "**Get today's lines** (any browser, including Safari):<br>"
-        f'1. Open the <a href="{FEED_URL}" target="_blank" rel="noopener">'
-        "PrizePicks feed &#8599;</a> in a new tab (sign in to PrizePicks first "
-        "if it asks).<br>"
-        "2. Select all (&#8984;A) and copy (&#8984;C).<br>"
-        "3. Paste it in the box below and click **Add these lines** (repeat per "
-        "PrizePicks stat tab, they accumulate).",
+        "**Or paste manually:** open the "
+        f'<a href="{FEED_URL}" target="_blank" rel="noopener">PrizePicks feed '
+        "&#8599;</a> (or copy a stat tab from the board), select all "
+        "(&#8984;A), copy (&#8984;C), paste below, then click **Add these lines**.",
         unsafe_allow_html=True)
-    st.text_area("PrizePicks JSON or a Name, Stat, Line list", height=170,
-                 key="pp_paste", placeholder=(
-                     "Paste the copied feed here, or type a simple list:\n"
+    st.text_area("Paste the grabber output, feed JSON, board text, or a "
+                 "Name, Stat, Line list", height=150, key="pp_paste",
+                 placeholder=(
+                     "Paste the grabber/feed output here, or type a simple list:\n"
                      "Ketel Marte, Total Bases, 1.5\n"
                      "Zac Gallen, Pitcher Strikeouts, 6.5"))
     # The paste is already merged into the saved set by resolve_and_persist at
-    # the top of the page, so n_saved here is the running total across tabs.
+    # the top of the page, so n_saved here is the running total.
     saved = props.load_lines(date_iso)
     n_saved = 0 if saved is None or saved.empty else len(saved)
     c_add, c_clear = st.columns([2.4, 1], gap="small")
@@ -206,20 +241,19 @@ def render_input(date_iso: str) -> None:
                   args=(date_iso,), use_container_width=True,
                   disabled=n_saved == 0,
                   help="Remove every line you have added for this date")
-    st.caption("PrizePicks has no All tab, so each paste ADDS to your lines "
-               "(re-pasting a tab just refreshes it, no duplicates). Paste one "
-               "stat tab, click Add, switch tabs, repeat. You can skip the "
-               "Fantasy Score, 1st-Inning and Combo tabs, those are not "
-               "projected. Lines apply to every game on the slate.")
+    st.caption("The grabber gets everything in one click. A manual paste ADDS to "
+               "your lines (re-pasting refreshes, no duplicates), so you can also "
+               "paste stat tabs one at a time. Skip Fantasy Score, 1st-Inning and "
+               "Combo props, those are not projected. Lines apply to every game.")
     if compared:
         st.toast(f"{n_saved} PrizePicks line(s) loaded." if n_saved
                  else "Couldn't read any lines from that paste.")
     if n_saved:
-        st.success(f"{n_saved} PrizePicks line(s) loaded across the tabs you have "
-                   "added. They show above and on every game page.")
+        st.success(f"{n_saved} PrizePicks line(s) loaded. They show above and on "
+                   "every game page.")
     elif (st.session_state.get("pp_paste") or "").strip():
-        st.warning("Couldn't read any lines from that paste. Paste the copied "
-                   "PrizePicks board or the feed JSON, or a simple "
+        st.warning("Couldn't read any lines from that paste. Paste the grabber "
+                   "output, the PrizePicks board or feed JSON, or a simple "
                    "`Name, Stat, Line` list.")
 
     # Best-effort automated pull (usually blocked by PrizePicks; harmless).
@@ -232,32 +266,4 @@ def render_input(date_iso: str) -> None:
             st.rerun()
         else:
             st.warning("PrizePicks blocked the automated pull (normal). Use the "
-                       "copy-and-paste steps above instead.")
-
-    # Optional bookmarklet, with Safari-correct install steps.
-    with st.expander("One-click bookmarklet (optional, advanced)", expanded=False):
-        st.markdown(
-            "Copies every line in one click, but the install is fiddly. "
-            "**Install:**<br>"
-            "1. Show your bookmarks bar first. In Safari: **View &rsaquo; Show "
-            "Favorites Bar** (&#8984;&#8679;B). In Chrome: **&#8984;&#8679;B**.<br>"
-            "2. Drag the button below onto that **bookmarks bar**, NOT the "
-            "address/search bar (Safari turns a script dropped there into a "
-            "search, which is what you saw).<br>"
-            "3. If dragging will not stick in Safari: copy the code below, "
-            "bookmark any page (&#8984;D), then **Bookmarks &rsaquo; Edit "
-            "Bookmarks**, and paste the code into that bookmark's Address field "
-            "(Safari accepts it there even though the address bar rejects it).<br>"
-            "Then open **prizepicks.com** and click the bookmark; it copies the "
-            "lines to your clipboard to paste above.", unsafe_allow_html=True)
-        html = (
-            '<a href="' + BOOKMARKLET.replace('"', "&quot;") + '" '
-            'style="display:inline-block;padding:8px 16px;border-radius:20px;'
-            'background:#0fae9d;color:#fff;font:600 14px Manrope,sans-serif;'
-            'text-decoration:none;cursor:grab" '
-            'onclick="event.preventDefault()">Grab PrizePicks lines</a>'
-            '<div style="font:13px Manrope,sans-serif;color:#71757f;'
-            'margin-top:8px">Drag me to your bookmarks bar (not the search bar).</div>')
-        components.html(html, height=70)
-        st.caption("Or copy this code and paste it as the new bookmark's Address:")
-        st.code(BOOKMARKLET, language="javascript")
+                       "grabber or copy-and-paste above instead.")

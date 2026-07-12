@@ -124,9 +124,15 @@ def parse_prizepicks_json(raw) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+_ODDS_TYPES = {"standard", "demon", "goblin"}
+
+
 def parse_line_list(text: str) -> pd.DataFrame:
     """Parse a pasted 'Name, Stat, Line' list (comma / pipe / tab separated),
-    one prop per line. A permissive fallback when JSON is not to hand."""
+    one prop per line. Also reads the one-click grabber's 4-column rows
+    'Name | Stat | Line | odds_type' (odds_type in the last field lets the whole
+    board come in one paste with the Demon/Goblin distinction kept). A permissive
+    fallback when JSON is not to hand."""
     rows = []
     for ln in (text or "").splitlines():
         ln = ln.strip()
@@ -138,15 +144,25 @@ def parse_line_list(text: str) -> pd.DataFrame:
             if not m:
                 continue
             parts = [m.group(1), m.group(2), m.group(3)]
+        # 4-column grabber rows carry odds_type last; otherwise the line is last.
+        odds = ""
+        if len(parts) >= 4 and parts[3].strip().lower() in _ODDS_TYPES:
+            name, stat, line_str = parts[0], parts[1], parts[2]
+            odds = parts[3].strip().lower()
+        else:
+            name, stat, line_str = parts[0], parts[1], parts[-1]
         try:
-            line = float(parts[-1])
+            line = float(line_str)
         except ValueError:
             continue
         if not np.isfinite(line):   # reject nan/inf tokens at the source
             continue
-        rows.append({"name": parts[0].strip(), "team": None,
-                     "stat_type": parts[1].strip(), "line": line,
-                     "start_time": None})
+        row = {"name": name.strip(), "team": None, "stat_type": stat.strip(),
+               "line": line, "start_time": None}
+        if odds:   # the feed does not spell out More vs Less; standard = both
+            row["odds_type"] = odds
+            row["direction"] = "both" if odds == "standard" else ""
+        rows.append(row)
     return pd.DataFrame(rows)
 
 

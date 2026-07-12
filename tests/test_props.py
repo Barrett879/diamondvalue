@@ -251,3 +251,20 @@ def test_parse_json_and_list():
     assert len(j) == 1 and j.iloc[0]["name"] == "Ketel Marte"
     lst = props.parse_line_list("Ketel Marte | Total Bases | 1.5\nZac Gallen, Strikeouts, 6")
     assert len(lst) == 2 and lst.iloc[1]["line"] == 6.0
+
+
+def test_parse_line_list_reads_grabber_odds_type():
+    # The one-click grabber emits 4 columns: Name | Stat | Line | odds_type.
+    txt = ("James Wood | Total Bases | 4.5 | goblin\n"
+           "Kyle Karros | Total Bases | 1.5 | demon\n"
+           "Casey Schmitt | Total Bases | 1.5 | standard\n"
+           "Ketel Marte, Total Bases, 1.5")     # 3-column still works
+    df = props.parse_line_list(txt)
+    assert len(df) == 4
+    by = {r["name"]: r for _, r in df.iterrows()}
+    assert by["James Wood"]["line"] == 4.5 and by["James Wood"]["odds_type"] == "goblin"
+    assert by["James Wood"]["direction"] == ""        # side unknown from the feed
+    assert by["Casey Schmitt"]["direction"] == "both"  # standard = both sides
+    assert by["Ketel Marte"]["line"] == 1.5            # 3-column line still last
+    # parse_any routes the pipe list to the line-list parser (not board/JSON).
+    assert len(props.parse_any(txt)) == 4
