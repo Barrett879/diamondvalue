@@ -17,28 +17,38 @@ import scripts.fetch_prizepicks as fp
 from mlblib import props, store
 
 # One-click grabber: runs in the user's OWN logged-in browser (where PrizePicks
-# is not Cloudflare-blocked), auto-pages through EVERY MLB projection across all
-# stat types (Name | Stat | Line | odds_type so the Demon/Goblin distinction
-# survives), then pops up a small box with the lines pre-selected. The user
-# presses Cmd+C (or clicks Copy) and pastes. IMPORTANT: it does NOT auto-copy
-# after the fetch -- awaiting the network requests consumes the click's user
+# is not Cloudflare-blocked). It resolves MLB's league id from /leagues (the
+# numeric id is NOT stable -- a hardcoded league_id returned 0 lines), auto-pages
+# through every projection (Name | Stat | Line | odds_type so the Demon/Goblin
+# distinction survives), then pops up a small box with the lines pre-selected.
+# The user presses Cmd+C (or clicks Copy) and pastes. IMPORTANT: it does NOT
+# auto-copy after the fetch -- awaiting the network consumes the click's user
 # activation, so navigator.clipboard.writeText then throws NotAllowedError in
-# Safari (and increasingly Chrome). The pre-selected textarea + Copy button copy
-# under a FRESH gesture, which every browser allows.
+# Safari (and increasingly Chrome); the pre-selected textarea + Copy button copy
+# under a FRESH gesture, which every browser allows. If it still finds nothing it
+# alerts a short diagnostic (resolved league, data/included counts, item types).
 BOOKMARKLET = (
-    "javascript:(async()=>{try{let o=[],P=1;for(let p=1;p<=P&&p<=8;p++){"
-    "let r=await fetch('https://api.prizepicks.com/projections?league_id=2"
-    "&per_page=250&page='+p+'&single_stat=true',{headers:{Accept:"
-    "'application/json'},credentials:'include'});if(!r.ok){alert('PrizePicks "
-    "returned '+r.status+'. Open prizepicks.com (signed in), then click "
-    "again.');return}let j=await r.json();P=(j.meta&&j.meta.total_pages)||1;"
-    "let n={};(j.included||[]).forEach(i=>{if(i.type=='new_player')n[i.id]="
-    "i.attributes.name});(j.data||[]).forEach(d=>{let a=d.attributes||{},"
-    "x=((d.relationships||{}).new_player||{}).data,m=x?n[x.id]:0;"
-    "if(m&&a.line_score!=null&&a.stat_type)o.push(m+' | '+a.stat_type+' | '"
-    "+a.line_score+' | '+(a.odds_type||'standard'))})}if(!o.length){alert("
-    "'No MLB lines found. Open prizepicks.com (MLB, signed in), then click "
-    "again.');return}let s=o.join(String.fromCharCode(10));let ov=document."
+    "javascript:(async()=>{try{let H={headers:{Accept:'application/json'},"
+    "credentials:'include'};let lid='2';try{let Lr=await fetch('https://"
+    "api.prizepicks.com/leagues?per_page=250',H);if(Lr.ok){let Lj=await "
+    "Lr.json();let mm=(Lj.data||[]).find(l=>{let a=l.attributes||{};return("
+    "(a.name||a.display_name||'')+'').toUpperCase()==='MLB'});if(mm)lid="
+    "mm.id}}catch(e){}let o=[],P=1,dbg='';for(let p=1;p<=P&&p<=8;p++){let r="
+    "await fetch('https://api.prizepicks.com/projections?league_id='+lid+"
+    "'&per_page=250&page='+p,H);if(!r.ok){alert('PrizePicks returned '+"
+    "r.status+'. Open prizepicks.com (signed in), then click again.');return}"
+    "let j=await r.json();P=(j.meta&&j.meta.total_pages)||1;let n={};"
+    "(j.included||[]).forEach(i=>{if(i.type=='new_player'||i.type=='player'){"
+    "let a=i.attributes||{};n[i.id]=a.name||a.display_name}});if(p==1)dbg="
+    "'lg '+lid+' data '+((j.data||[]).length)+' incl '+((j.included||[])."
+    "length)+' dt '+((j.data&&j.data[0]&&j.data[0].type)||'?')+' it '+"
+    "((j.included&&j.included[0]&&j.included[0].type)||'?');(j.data||[])."
+    "forEach(d=>{let a=d.attributes||{},rel=d.relationships||{},xd=((rel."
+    "new_player||rel.player||{}).data)||{},m=n[xd.id];if(m&&a.line_score!="
+    "null&&a.stat_type)o.push(m+' | '+a.stat_type+' | '+a.line_score+' | '+"
+    "(a.odds_type||'standard'))})}if(!o.length){alert('Grabbed 0 lines. "
+    "Debug: '+dbg+'. Copy this text and send it to DiamondValue.');return}"
+    "let s=o.join(String.fromCharCode(10));let ov=document."
     "createElement('div');ov.style.cssText='position:fixed;inset:0;z-index:"
     "2147483647;background:rgba(0,0,0,.72);display:flex;align-items:center;"
     "justify-content:center;font-family:-apple-system,sans-serif';let bx="
