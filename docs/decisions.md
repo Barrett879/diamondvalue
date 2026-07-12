@@ -379,3 +379,27 @@ spacer rows Streamlit leaves around injected <style> blocks (tighter top).
 Accuracy chart rebuilt as a sorted horizontal "% better than season average"
 bar (scale-free, so Pitches at ~9 MAE no longer dwarfs the rate stats).
 Verified in light and dark, no console errors.
+
+## PrizePicks line comparison (2026-07-11)
+
+New Props page comparing our per-game projections to posted PrizePicks lines
+(informational model-vs-market view, not betting advice -- no wager or stake
+recommendations). mlblib/props.py: role-aware stat-type mapping (the same PP
+label means different columns for a hitter vs pitcher -- "Strikeouts" -> SO for
+a batter, K for a pitcher; "Hits"/"Walks" resolve by the matched player's
+role), composite stats (Hits+Runs+RBIs), accent/period/suffix name folding,
+and a compare() that returns model / line / edge / lean sorted by disagreement.
+
+SCRAPING CONSTRAINT: PrizePicks fronts its API with Cloudflare -- automated
+requests get 403 (confirmed from Bash with full browser headers), and this
+environment additionally blocks the domain by policy. Getting past that needs
+TLS-fingerprint / headless-stealth techniques we don't use. So lines come from
+(1) a paste box -- the reliable path: the user copies the projections JSON (or
+a "Name, Stat, Line" list) from their own logged-in browser -- and (2) a
+best-effort "Update now" live pull (scripts/fetch_prizepicks.py) that works
+only where PrizePicks does not block the client and fails gracefully to the
+paste box otherwise. RECOMMENDED an on-demand button over auto-refresh: lines
+move intraday (a scheduled scrape would be stale) and keeping the pull off the
+daily cron avoids hammering PrizePicks. Verified end-to-end in the preview:
+5 real players matched, correct pitcher/batter column resolution, graceful
+403 handling. prizepicks_raw_* cache files are gitignored (transient).

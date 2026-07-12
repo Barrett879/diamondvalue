@@ -24,6 +24,7 @@ THEME_DEFAULT_DARK = False
 # Nav pages: (label, url). Home is rendered separately.
 _NAV_PAGES = [
     ("Player", "/Player"),
+    ("Props", "/Props"),
     ("Accuracy", "/Accuracy"),
     ("About", "/About"),
 ]
