@@ -120,28 +120,62 @@ def render_board(scope_preds: pd.DataFrame, date_iso: str,
     return meta["matched"]
 
 
+FEED_URL = ("https://api.prizepicks.com/projections?"
+            "league_id=2&per_page=250&single_stat=true")
+
+
 def render_input(date_iso: str) -> None:
-    """The line-input controls: a best-effort live pull, the bookmarklet
-    installer, and the paste box. Persistence/comparison is handled by
-    resolve_and_persist + render_board; this only draws the widgets."""
-    if st.button("Update now", type="primary",
-                 help="Try a live PrizePicks pull for this date", key="pp_update"):
+    """The line-input controls. The reliable, all-browser path is: open the
+    PrizePicks feed in a new tab, copy the JSON, paste it. A best-effort live
+    pull and an optional bookmarklet are also offered. Persistence/comparison
+    is handled by resolve_and_persist + render_board; this only draws widgets."""
+    # Primary path -- works in Safari, Chrome, anywhere, no install.
+    st.markdown(
+        "**Get today's lines** (any browser, including Safari):<br>"
+        f'1. Open the <a href="{FEED_URL}" target="_blank" rel="noopener">'
+        "PrizePicks feed &#8599;</a> in a new tab (sign in to PrizePicks first "
+        "if it asks).<br>"
+        "2. Select all (&#8984;A) and copy (&#8984;C).<br>"
+        "3. Paste it in the box below and click **Compare**.",
+        unsafe_allow_html=True)
+    st.text_area("PrizePicks JSON or a Name, Stat, Line list", height=170,
+                 key="pp_paste", placeholder=(
+                     "Paste the copied feed here, or type a simple list:\n"
+                     "Ketel Marte, Total Bases, 1.5\n"
+                     "Zac Gallen, Pitcher Strikeouts, 6.5"))
+    st.button("Compare pasted lines", type="primary", key="pp_compare")
+    st.caption("Tip: after pasting, click **Compare** or click anywhere outside "
+               "the box (pressing Enter alone just adds a line). Lines apply to "
+               "every game on the slate.")
+
+    # Best-effort automated pull (usually blocked by PrizePicks; harmless).
+    if st.button("Try a live pull instead", key="pp_update",
+                 help="Attempts to fetch directly; PrizePicks usually blocks this"):
         with st.spinner("Pulling PrizePicks lines..."):
             payload = fp.fetch(date_iso)
         if payload:
             st.session_state["pp_payload"] = payload
             st.rerun()
         else:
-            st.warning("PrizePicks blocked the automated request (this is "
-                       "normal). Paste the lines below instead.")
+            st.warning("PrizePicks blocked the automated pull (normal). Use the "
+                       "copy-and-paste steps above instead.")
 
-    with st.expander("One-click grab (bookmarklet)", expanded=False):
+    # Optional bookmarklet, with Safari-correct install steps.
+    with st.expander("One-click bookmarklet (optional, advanced)", expanded=False):
         st.markdown(
-            "Install this once, then it grabs every MLB line for you. "
-            "**Drag the button below to your bookmarks bar** (or make a new "
-            "bookmark and paste the code as its URL). Then open "
-            "**prizepicks.com** in a tab and click the bookmark: it copies all "
-            "the lines to your clipboard. Come back here and paste below.")
+            "Copies every line in one click, but the install is fiddly. "
+            "**Install:**<br>"
+            "1. Show your bookmarks bar first. In Safari: **View &rsaquo; Show "
+            "Favorites Bar** (&#8984;&#8679;B). In Chrome: **&#8984;&#8679;B**.<br>"
+            "2. Drag the button below onto that **bookmarks bar**, NOT the "
+            "address/search bar (Safari turns a script dropped there into a "
+            "search, which is what you saw).<br>"
+            "3. If dragging will not stick in Safari: copy the code below, "
+            "bookmark any page (&#8984;D), then **Bookmarks &rsaquo; Edit "
+            "Bookmarks**, and paste the code into that bookmark's Address field "
+            "(Safari accepts it there even though the address bar rejects it).<br>"
+            "Then open **prizepicks.com** and click the bookmark; it copies the "
+            "lines to your clipboard to paste above.", unsafe_allow_html=True)
         html = (
             '<a href="' + BOOKMARKLET.replace('"', "&quot;") + '" '
             'style="display:inline-block;padding:8px 16px;border-radius:20px;'
@@ -149,21 +183,7 @@ def render_input(date_iso: str) -> None:
             'text-decoration:none;cursor:grab" '
             'onclick="event.preventDefault()">Grab PrizePicks lines</a>'
             '<div style="font:13px Manrope,sans-serif;color:#71757f;'
-            'margin-top:8px">Drag me up to your bookmarks bar.</div>')
+            'margin-top:8px">Drag me to your bookmarks bar (not the search bar).</div>')
         components.html(html, height=70)
-        st.caption("Or copy the code and paste it as a new bookmark's URL:")
+        st.caption("Or copy this code and paste it as the new bookmark's Address:")
         st.code(BOOKMARKLET, language="javascript")
-
-    st.markdown(
-        "Open PrizePicks in your own browser, then either copy the JSON from "
-        "`api.prizepicks.com/projections?league_id=2&per_page=250` and paste "
-        "it below, **or** type a simple `Name, Stat, Line` list (one per row).")
-    st.text_area("PrizePicks JSON or a Name, Stat, Line list", height=180,
-                 key="pp_paste", placeholder=(
-                     "Ketel Marte, Total Bases, 1.5\n"
-                     "Corbin Carroll, Hits, 0.5\n"
-                     "Zac Gallen, Pitcher Strikeouts, 6.5"))
-    st.button("Compare pasted lines", type="primary", key="pp_compare")
-    st.caption("Tip: after pasting, click **Compare** or click anywhere outside "
-               "the box (pressing Enter alone just adds a line). Lines apply to "
-               "every game on the slate.")
