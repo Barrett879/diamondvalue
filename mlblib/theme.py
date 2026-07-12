@@ -514,16 +514,31 @@ COMMON_CSS = """
     .dv-xrow[open] .xcaret.has { background: var(--fg-1); }
     /* expanded panel: this player's posted lines vs our model */
     .dv-xbody { padding: 0.15rem 0.9rem 0.65rem; background: var(--row-tint); }
+    .dv-prow { padding: 0.35rem 0; border-bottom: 1px solid var(--hairline-soft); }
+    .dv-prow:last-child { border-bottom: none; }
     .dv-pline { display: flex; align-items: center; gap: 0.7rem;
-        padding: 0.35rem 0; border-bottom: 1px solid var(--hairline-soft);
         font-size: 0.85rem; }
-    .dv-pline:last-child { border-bottom: none; }
     .dv-pline .ps { font-weight: 600; color: var(--fg-2); min-width: 8.5rem; }
     .dv-pline .pv { color: var(--fg-3); font-variant-numeric: tabular-nums; }
     .dv-pline .pv i { color: var(--fg-5); font-style: normal; padding: 0 0.2rem; }
     .dv-pline .pe { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
     .dv-pline .pe.over  { color: var(--accent-teal); }
     .dv-pline .pe.under { color: var(--amber); }
+    /* Sub-line: which side(s) PrizePicks offers (More/Less/both), the Demon or
+       Goblin payout tag, and a note when the model's own lean is a side the
+       market does not offer. Informational market facts, never a wager prompt. */
+    .dv-pmeta { display: flex; align-items: center; gap: 0.5rem;
+        margin-top: 0.16rem; font-size: 0.72rem; }
+    .dv-pmeta .pd { color: var(--fg-4); font-weight: 600; letter-spacing: 0.01em; }
+    .dv-pmeta .podds { font-size: 0.58rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; padding: 0.06rem 0.36rem; border-radius: 999px;
+        border: 1px solid transparent; }
+    .dv-pmeta .podds.demon { color: #e0564c;
+        background: rgba(224, 86, 76, 0.12); border-color: rgba(224, 86, 76, 0.30); }
+    .dv-pmeta .podds.goblin { color: #1f9f5f;
+        background: rgba(31, 159, 95, 0.12); border-color: rgba(31, 159, 95, 0.30); }
+    .dv-pxwarn { margin-top: 0.14rem; font-size: 0.7rem; color: var(--fg-5);
+        font-style: italic; }
 
     /* Model-vs-board edge strip (Game page PrizePicks section). Teal = model
        over the line, amber = under -- direction only, NOT a bet win/loss. */

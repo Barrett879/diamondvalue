@@ -136,6 +136,32 @@ def _col_template(n_cols: int, label_cols: int) -> str:
     return f"minmax(6rem, 1.7fr) repeat({n_cols - 1}, 1fr) 1.6rem"
 
 
+_DIR_LABEL = {"both": "More &amp; Less", "more": "More only", "less": "Less only"}
+
+
+def _props_meta(p: dict) -> str:
+    """The sub-line under a posted line: which side(s) PrizePicks offers, the
+    Demon/Goblin payout tag, and a note when the model's own lean is a side the
+    market does not offer. Informational market facts, not a wager prompt."""
+    direction = str(p.get("Direction", "") or "")
+    odds = str(p.get("OddsType", "") or "").lower()
+    bits = []
+    label = _DIR_LABEL.get(direction)
+    if label:
+        bits.append(f'<span class="pd">{label}</span>')
+    if odds in ("demon", "goblin"):
+        bits.append(f'<span class="podds {odds}">{odds.capitalize()}</span>')
+    meta = (f'<div class="dv-pmeta">{"".join(bits)}</div>') if bits else ""
+    # Cross-reference: More is the Over side, Less the Under side. If the model
+    # leans a side that is not among the offered directions, flag it.
+    lean = str(p.get("Lean", ""))
+    model_side = "more" if lean == "Over" else "less" if lean == "Under" else ""
+    if model_side and direction in ("more", "less") and direction != model_side:
+        meta += (f'<div class="dv-pxwarn">model&rsquo;s {_esc(lean)} side '
+                 f"not offered</div>")
+    return meta
+
+
 def _props_body(props: list) -> str:
     """The expanded panel for one player: their posted lines vs our model."""
     lines = []
@@ -143,11 +169,12 @@ def _props_body(props: list) -> str:
         edge = float(p["Edge"])
         d = "over" if edge > 0 else ("under" if edge < 0 else "")
         lines.append(
+            f'<div class="dv-prow">'
             f'<div class="dv-pline">'
             f'<span class="ps">{_esc(p["Stat"])}</span>'
             f'<span class="pv">{float(p["Model"]):g} <i>vs</i> {float(p["Line"]):g}</span>'
             f'<span class="pe {d}">{edge:+g} {_esc(p["Lean"])}</span>'
-            f"</div>")
+            f"</div>{_props_meta(p)}</div>")
     return f'<div class="dv-xbody">{"".join(lines)}</div>'
 
 

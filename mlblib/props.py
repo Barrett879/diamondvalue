@@ -110,10 +110,17 @@ def parse_prizepicks_json(raw) -> pd.DataFrame:
         name, team = players.get(pid, (a.get("description"), None))
         if not name or a.get("line_score") is None:
             continue
+        # odds_type ("standard"/"demon"/"goblin") when the feed carries it. The
+        # feed does not spell out More vs Less, so we can only say "both" for a
+        # standard prop; a Demon/Goblin is one-sided but the side is unknown here
+        # (the pasted board text is the reliable source for direction).
+        odds = (a.get("odds_type") or "standard").lower()
         rows.append({"name": name, "team": team,
                      "stat_type": a.get("stat_type") or a.get("stat_display_name"),
                      "line": float(a.get("line_score")),
-                     "start_time": a.get("start_time")})
+                     "start_time": a.get("start_time"),
+                     "direction": "both" if odds == "standard" else "",
+                     "odds_type": odds})
     return pd.DataFrame(rows)
 
 
@@ -170,6 +177,13 @@ def parse_prizepicks_board(text: str) -> pd.DataFrame:
             continue
         team = ln.split(" - ")[0]
         name = _BOARD_SUFFIX.sub("", lines[i + 1]).strip()
+        # Odds type rides on the pre-anchor name line (e.g. "James WoodGoblin");
+        # the clean name at i+1 already has the tag stripped by the site. Demon =
+        # harder line / bigger payout, Goblin = easier line / smaller payout;
+        # both are one-sided, standard offers both sides.
+        prev = lines[i - 1] if i > 0 else ""
+        odds = ("demon" if prev.endswith("Demon")
+                else "goblin" if prev.endswith("Goblin") else "standard")
         # The line number sits a couple rows down (after the matchup); scan a
         # small window so an occasional extra row doesn't break alignment.
         num_i = next((j for j in range(i + 2, min(i + 6, len(lines)))
@@ -186,9 +200,20 @@ def parse_prizepicks_board(text: str) -> pd.DataFrame:
         key = stat.lower()
         if key in _BOARD_SKIP or _BOARD_TEAMPOS.match(stat):
             continue
+        # Direction: the Less/More buttons follow the stat label. Both present =
+        # you can take either side; one = that side only (typical for Demon/Goblin).
+        j = num_i + 2
+        btns = set()
+        while j < len(lines) and lines[j] in ("Less", "More"):
+            btns.add(lines[j])
+            j += 1
+        direction = ("both" if {"Less", "More"} <= btns
+                     else "more" if "More" in btns
+                     else "less" if "Less" in btns else "")
         rows.append({"name": name, "team": team,
                      "stat_type": _BOARD_ALIAS.get(key, stat),
-                     "line": line, "start_time": None})
+                     "line": line, "start_time": None,
+                     "direction": direction, "odds_type": odds})
     return pd.DataFrame(rows)
 
 
@@ -226,7 +251,8 @@ def save_lines(date: str, lines: pd.DataFrame) -> None:
     content is unchanged, so the freshness caption does not drift on reruns."""
     if lines is None or lines.empty:
         return
-    keep = [c for c in ("name", "team", "stat_type", "line", "start_time")
+    keep = [c for c in ("name", "team", "stat_type", "line", "start_time",
+                        "direction", "odds_type")
             if c in lines.columns]
     recs = json.loads(lines[keep].to_json(orient="records"))
     p = lines_path(date)
@@ -325,6 +351,8 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame) -> tuple[pd.DataFrame, dic
             "Line": round(line, 2),
             "Edge": round(edge, 2),
             "Lean": "Over" if edge > 0 else ("Under" if edge < 0 else "Even"),
+            "Direction": ln.get("direction") or "",
+            "OddsType": ln.get("odds_type") or "",
             "_abs": abs(edge),
         })
     table = pd.DataFrame(out)

@@ -128,6 +128,44 @@ def test_parse_prizepicks_board_text():
     assert len(props.parse_any(board)) == len(df) >= 3
 
 
+def test_board_captures_direction_and_odds():
+    board = (
+        "Trending\n38.8K\nJames WoodGoblin\nWSH - OF\nJames Wood\n"
+        "WSH 1vs NYY 0\nCur. 4\n4.5\nTB\nMore\n"
+        "Trending\n20.4K\nTarik SkubalDemon\nDET - P\nTarik Skubal\n"
+        "DET 0vs PHI 0\nCur. 2\n7.5\nKs\nMore\n"
+        "Trending\n7.2K\nCasey Schmitt\nSF - OF\nCasey Schmitt\n"
+        "vs COL Sun 1:05pm\n1.5\nTB\nLess\nMore\n")
+    df = props.parse_prizepicks_board(board)
+    got = {r["name"]: (r["direction"], r["odds_type"]) for _, r in df.iterrows()}
+    assert got["James Wood"] == ("more", "goblin")
+    assert got["Tarik Skubal"] == ("more", "demon")     # Demon = one-sided More
+    assert got["Casey Schmitt"] == ("both", "standard")  # standard = both sides
+
+
+def test_compare_carries_direction_and_flags_unoffered_side():
+    from mlblib import store
+    lines = pd.DataFrame([
+        {"name": "Zac Gallen", "stat_type": "Pitcher Strikeouts", "line": 7.5,
+         "direction": "more", "odds_type": "demon"},
+    ])
+    table, _ = props.compare(lines, _preds())
+    r = table.iloc[0]
+    assert r["Direction"] == "more" and r["OddsType"] == "demon"
+    # Gallen model K = 6.0 vs line 7.5 -> Under; only More offered -> flag.
+    meta = store._props_meta(dict(r))
+    assert "More only" in meta and "Demon" in meta
+    assert "Under side not offered" in meta
+
+
+def test_props_meta_no_flag_when_side_offered():
+    from mlblib import store
+    p = {"Stat": "TB", "Model": 2.0, "Line": 1.5, "Edge": 0.5, "Lean": "Over",
+         "Direction": "both", "OddsType": "standard"}
+    meta = store._props_meta(p)
+    assert "More &amp; Less" in meta and "not offered" not in meta
+
+
 def _bat(game, name, **over):
     row = {"gamePk": game, "fullName": name, "role": "bat", "TB": 2.0, "H": 1.0,
            "HR": 0.3, "R": 0.6, "RBI": 0.5, "BB": 0.3, "SO": 0.8, "SB": 0.1,
