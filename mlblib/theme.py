@@ -295,6 +295,49 @@ COMMON_CSS = """
     .dv-game-right { display: flex; align-items: center; gap: 0.9rem; }
     .dv-game-time { color: var(--fg-3); font-size: 0.9rem; }
     .dv-game-arrow { color: var(--accent-teal); font-weight: 700; }
+
+    /* Slate grid: square game cards, 6 across, away stacked over home */
+    .dv-slate-grid {
+        display: grid; grid-template-columns: repeat(6, 1fr);
+        gap: 0.7rem; margin: 0.4rem 0 1.2rem;
+    }
+    @media (max-width: 1080px) { .dv-slate-grid { grid-template-columns: repeat(4, 1fr); } }
+    @media (max-width: 760px)  { .dv-slate-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 500px)  { .dv-slate-grid { grid-template-columns: repeat(2, 1fr); } }
+    a.dv-slate-card {
+        display: flex; flex-direction: column; align-items: center;
+        justify-content: center; aspect-ratio: 1 / 1; padding: 0.55rem;
+        background: var(--panel); border: 1px solid var(--panel-line);
+        border-radius: 14px; text-decoration: none; text-align: center;
+        box-shadow: var(--shadow-card);
+        transition: border-color .12s, transform .12s, box-shadow .12s;
+    }
+    a.dv-slate-card:hover {
+        border-color: var(--accent-teal); transform: translateY(-2px);
+    }
+    .dv-slate-away, .dv-slate-home {
+        font-family: 'Space Grotesk', sans-serif; font-size: 1.4rem;
+        font-weight: 700; color: var(--fg-1); line-height: 1.1;
+        letter-spacing: -0.01em;
+    }
+    .dv-slate-at {
+        color: var(--accent-teal); font-weight: 600; font-size: 0.82rem;
+        margin: 0.12rem 0;
+    }
+    .dv-slate-time {
+        color: var(--fg-3); font-size: 0.74rem; font-weight: 600;
+        margin-top: 0.55rem; letter-spacing: 0.02em; white-space: nowrap;
+    }
+    .dv-slate-status {
+        display: inline-flex; align-items: center; gap: 0.32rem;
+        color: var(--fg-5); font-size: 0.66rem; margin-top: 0.2rem;
+    }
+    .dv-slate-status::before {
+        content: ""; width: 6px; height: 6px; border-radius: 50%;
+        background: var(--fg-6); flex: none;
+    }
+    .dv-slate-status.s-posted::before  { background: var(--value-good); }
+    .dv-slate-status.s-partial::before { background: var(--amber); }
     a.dv-back {
         display: inline-block; color: var(--accent-teal); text-decoration: none;
         font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem;

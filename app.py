@@ -120,18 +120,23 @@ if not rows:
 st.markdown(f"### {len(rows)} game{'s' if len(rows) != 1 else ''} on {date_iso}")
 st.caption("Click a game to see both teams' rosters and every predicted stat.")
 
+_STATUS_CLS = {"lineups posted": "s-posted", "1 lineup posted": "s-partial",
+               "lineups not posted": "s-none"}
 cards = []
 for gpk, away, home, et, status in rows:
     href = game_url(date_iso, gpk, dark)
+    scls = _STATUS_CLS.get(status, "s-none")
     cards.append(
-        f'<a class="dv-game-card" href="{href}" target="_self">'
-        f'<span class="dv-game-match">{away}<span class="at">@</span>{home}</span>'
-        f'<span class="dv-game-right">'
-        f'<span class="dv-game-time">{et} &middot; {status}</span>'
-        f'<span class="dv-game-arrow">&rarr;</span>'
-        f"</span></a>"
+        f'<a class="dv-slate-card" href="{href}" target="_self">'
+        f'<span class="dv-slate-away">{away}</span>'
+        f'<span class="dv-slate-at">@</span>'
+        f'<span class="dv-slate-home">{home}</span>'
+        f'<span class="dv-slate-time">{et}</span>'
+        f'<span class="dv-slate-status {scls}">{status}</span>'
+        f"</a>"
     )
-st.markdown("".join(cards), unsafe_allow_html=True)
+st.markdown(f'<div class="dv-slate-grid">{"".join(cards)}</div>',
+            unsafe_allow_html=True)
 
 st.caption("Pitcher strikeouts are the most predictable per-game stat. Batter "
            "single-game numbers are low-signal by nature; treat every value as "
