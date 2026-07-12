@@ -18,25 +18,53 @@ from mlblib import props, store
 
 # One-click grabber: runs in the user's OWN logged-in browser (where PrizePicks
 # is not Cloudflare-blocked), auto-pages through EVERY MLB projection across all
-# stat types, and copies a clean "Name | Stat | Line | odds_type" list to the
-# clipboard ready to paste -- the whole board in one click. odds_type (standard/
-# demon/goblin) rides along so the paste keeps the Demon/Goblin distinction.
+# stat types (Name | Stat | Line | odds_type so the Demon/Goblin distinction
+# survives), then pops up a small box with the lines pre-selected. The user
+# presses Cmd+C (or clicks Copy) and pastes. IMPORTANT: it does NOT auto-copy
+# after the fetch -- awaiting the network requests consumes the click's user
+# activation, so navigator.clipboard.writeText then throws NotAllowedError in
+# Safari (and increasingly Chrome). The pre-selected textarea + Copy button copy
+# under a FRESH gesture, which every browser allows.
 BOOKMARKLET = (
     "javascript:(async()=>{try{let o=[],P=1;for(let p=1;p<=P&&p<=8;p++){"
     "let r=await fetch('https://api.prizepicks.com/projections?league_id=2"
     "&per_page=250&page='+p+'&single_stat=true',{headers:{Accept:"
     "'application/json'},credentials:'include'});if(!r.ok){alert('PrizePicks "
-    "returned '+r.status+'. Open prizepicks.com first, then click again.');"
-    "return}let j=await r.json();P=(j.meta&&j.meta.total_pages)||1;let n={};"
-    "(j.included||[]).forEach(i=>{if(i.type=='new_player')n[i.id]="
+    "returned '+r.status+'. Open prizepicks.com (signed in), then click "
+    "again.');return}let j=await r.json();P=(j.meta&&j.meta.total_pages)||1;"
+    "let n={};(j.included||[]).forEach(i=>{if(i.type=='new_player')n[i.id]="
     "i.attributes.name});(j.data||[]).forEach(d=>{let a=d.attributes||{},"
     "x=((d.relationships||{}).new_player||{}).data,m=x?n[x.id]:0;"
     "if(m&&a.line_score!=null&&a.stat_type)o.push(m+' | '+a.stat_type+' | '"
-    "+a.line_score+' | '+(a.odds_type||'standard'))})}await navigator."
-    "clipboard.writeText(o.join(String.fromCharCode(10)));alert('Copied '+"
-    "o.length+' PrizePicks MLB lines. Paste them into DiamondValue and click "
-    "Add.')}catch(e){alert('Could not fetch PrizePicks ('+e+'). Open "
-    "prizepicks.com in this tab first, then click the bookmarklet.')}})();"
+    "+a.line_score+' | '+(a.odds_type||'standard'))})}if(!o.length){alert("
+    "'No MLB lines found. Open prizepicks.com (MLB, signed in), then click "
+    "again.');return}let s=o.join(String.fromCharCode(10));let ov=document."
+    "createElement('div');ov.style.cssText='position:fixed;inset:0;z-index:"
+    "2147483647;background:rgba(0,0,0,.72);display:flex;align-items:center;"
+    "justify-content:center;font-family:-apple-system,sans-serif';let bx="
+    "document.createElement('div');bx.style.cssText='background:#fff;color:"
+    "#111;padding:18px;border-radius:12px;width:min(560px,92vw);box-shadow:"
+    "0 12px 44px rgba(0,0,0,.45)';let ms=document.createElement('div');"
+    "ms.style.cssText='font:600 15px sans-serif;margin-bottom:10px';"
+    "ms.textContent='Got '+o.length+' PrizePicks lines. Press Cmd+C (already "
+    "selected) or click Copy, then paste into DiamondValue.';let ta=document."
+    "createElement('textarea');ta.readOnly=true;ta.value=s;ta.style.cssText="
+    "'width:100%;height:150px;font:12px monospace;padding:8px;border:1px "
+    "solid #ccc;border-radius:8px;box-sizing:border-box';let cp=document."
+    "createElement('button');cp.textContent='Copy';cp.style.cssText="
+    "'margin-top:10px;padding:8px 18px;border:0;border-radius:20px;"
+    "background:#0fae9d;color:#fff;font:600 14px sans-serif;cursor:pointer';"
+    "let cl=document.createElement('button');cl.textContent='Close';"
+    "cl.style.cssText='margin:10px 0 0 8px;padding:8px 18px;border:1px solid "
+    "#ccc;border-radius:20px;background:#fff;color:#333;font:600 14px "
+    "sans-serif;cursor:pointer';bx.appendChild(ms);bx.appendChild(ta);"
+    "bx.appendChild(cp);bx.appendChild(cl);ov.appendChild(bx);document.body."
+    "appendChild(ov);ta.focus();ta.select();cp.onclick=function(){ta.focus();"
+    "ta.select();var ok=false;try{ok=document.execCommand('copy')}catch(e){}"
+    "if(!ok){try{navigator.clipboard.writeText(s)}catch(e){}}cp.textContent="
+    "'Copied!'};cl.onclick=function(){ov.remove()};}catch(e){alert('Could "
+    "not reach PrizePicks ('+e+'). Open prizepicks.com in THIS tab (signed "
+    "in), then click the bookmark.')}})();"
 )
 
 
@@ -199,8 +227,9 @@ def render_input(date_iso: str) -> None:
             "**Bookmarks &rsaquo; Edit Bookmarks**, and paste it into that "
             "bookmark's **Address** field.<br><br>"
             "**Each day:** open **prizepicks.com** (signed in), click the "
-            "bookmark, come back here, paste in the box, click **Add these "
-            "lines**. That is the whole board in one paste.",
+            "bookmark. A small box pops up with the whole board pre-selected. "
+            "Press **&#8984;C** (or click Copy), then come back here, paste in "
+            "the box, and click **Add these lines**.",
             unsafe_allow_html=True)
         # The <a href> holds the bookmarklet so Chrome can DRAG it to the
         # bookmarks bar; clicking instead COPIES it (Safari can't drag a
