@@ -63,6 +63,7 @@ st.caption(
 
 
 def _show(lines):
+    props.save_lines(date_iso, lines)   # persist so the Game pages can read it
     table, meta = props.compare(lines, preds)
     if table.empty:
         st.warning("No lines matched a projected player on today's slate. "
@@ -75,6 +76,7 @@ def _show(lines):
         bits.append(f"{meta['unmatched']} player(s) not on this slate")
     if meta["unmapped"]:
         bits.append(f"{meta['unmapped']} stat type(s) we don't project")
+    bits.append("saved for the game pages")
     st.caption(" · ".join(bits))
 
 

@@ -15,9 +15,18 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+
+from . import cache
+
+try:
+    from zoneinfo import ZoneInfo
+    _ET = ZoneInfo("America/New_York")
+except Exception:  # pragma: no cover  # noqa: BLE001
+    _ET = None
 
 # PrizePicks stat_type (lowercased) -> (columns to sum, scale). Resolved per
 # ROLE: the same label ("Strikeouts", "Walks", "Hits") means different columns
@@ -126,10 +135,77 @@ def parse_line_list(text: str) -> pd.DataFrame:
             line = float(parts[-1])
         except ValueError:
             continue
+        if not np.isfinite(line):   # reject nan/inf tokens at the source
+            continue
         rows.append({"name": parts[0].strip(), "team": None,
                      "stat_type": parts[1].strip(), "line": line,
                      "start_time": None})
     return pd.DataFrame(rows)
+
+
+def lines_path(date: str):
+    return cache.dc_path(f"pp_lines_{date.replace('-', '_')}_v1.json")
+
+
+def save_lines(date: str, lines: pd.DataFrame) -> None:
+    """Persist the normalized posted lines for `date` so the Game pages can read
+    them across a hard <a target=_self> deep link (session_state does not
+    survive it). Called from the single Props funnel, so the paste flow finally
+    persists too. The to_json/json.loads round-trip is load-bearing: a plain
+    to_dict would hand json_save numpy.float64, which json.dumps cannot
+    serialize (the write would fail silently). Keeps saved_at stable when the
+    content is unchanged, so the freshness caption does not drift on reruns."""
+    if lines is None or lines.empty:
+        return
+    keep = [c for c in ("name", "team", "stat_type", "line", "start_time")
+            if c in lines.columns]
+    recs = json.loads(lines[keep].to_json(orient="records"))
+    p = lines_path(date)
+    if p.exists():
+        try:
+            if cache.json_load(p).get("lines") == recs:
+                return
+        except Exception:  # noqa: BLE001
+            pass
+    cache.json_save(p, {"saved_at": datetime.now(timezone.utc).isoformat(),
+                        "lines": recs})
+
+
+def load_lines(date: str) -> pd.DataFrame | None:
+    """Read back the persisted lines for `date` (or None). The save time rides
+    on the frame's .attrs['saved_at'] for the freshness caption."""
+    p = lines_path(date)
+    if not p.exists():
+        return None
+    try:
+        blob = cache.json_load(p)
+    except Exception:  # noqa: BLE001
+        return None
+    df = pd.DataFrame(blob.get("lines", []))
+    if df.empty:
+        return None
+    df.attrs["saved_at"] = blob.get("saved_at")
+    return df
+
+
+def saved_at_et(iso: str | None) -> str:
+    """'Mon D, HH:MM ET' for a saved_at ISO-UTC stamp; '' if missing/
+    unparseable. The date is always shown so a stale save on a past-date game
+    page can't read as if the lines were pulled today. If the Eastern zone is
+    unavailable (no tzdata), the time is labelled UTC rather than mislabelled
+    as ET."""
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso)
+        if _ET is not None:
+            dt = dt.astimezone(_ET)
+            tz = "ET"
+        else:
+            tz = "UTC"
+        return dt.strftime(f"%b {dt.day}, %H:%M {tz}")
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def compare(lines: pd.DataFrame, preds: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
@@ -165,8 +241,12 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame) -> tuple[pd.DataFrame, dic
             unmapped += 1
             continue
         row, cols, scale = picked
+        line = ln.get("line")
+        if line is None or not np.isfinite(line):  # null/nan survived a paste
+            unmapped += 1
+            continue
         model = scale * float(sum(float(row[c]) for c in cols))
-        line = float(ln["line"])
+        line = float(line)
         edge = model - line
         out.append({
             "Player": row["fullName"],

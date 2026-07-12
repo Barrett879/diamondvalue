@@ -12,7 +12,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from mlblib import fetch, store  # noqa: E402
+from mlblib import fetch, props, store  # noqa: E402
 from mlblib.theme import (  # noqa: E402
     SENTINEL,
     render_footer,
@@ -76,6 +76,61 @@ def _render_side(side_df: pd.DataFrame, team_name: str, probable: str | None,
         st.markdown(store.html_batter_table(bench), unsafe_allow_html=True)
 
 
+def _render_market_board(gp: pd.DataFrame, date: str) -> None:
+    """Model-vs-PrizePicks section for this game: a 'biggest gaps' strip over
+    the full model-vs-line ledger. Both rank by ABSOLUTE gap (model minus line)
+    so the strip's leading chip is the ledger's top row -- the biggest
+    difference. Offline and informational. Renders nothing when no lines are
+    stored for the date, or when none of this game's players have a posted,
+    mappable line.
+    """
+    lines = props.load_lines(date)
+    if lines is None or lines.empty:
+        return
+    table, meta = props.compare(lines, gp)  # restricted to THIS game
+    if table.empty:
+        return
+    st.markdown('<div class="dv-eyebrow">Model vs the board &middot; '
+                'PrizePicks lines</div>', unsafe_allow_html=True)
+
+    # table is already sorted by |edge| desc. Drop rounded-zero gaps (a chip
+    # with identical numbers carries no signal). Bar = |edge| vs the game's
+    # biggest gap, so the leading chip is full and the rest are proportional.
+    strip = table[table["Edge"].abs() >= 0.005]
+    chips = strip.head(6)
+    if not chips.empty:
+        top = float(chips["Edge"].abs().max()) or 1.0
+        parts = []
+        for _, r in chips.iterrows():
+            d = "over" if r["Edge"] > 0 else "under"
+            w = int(round(abs(float(r["Edge"])) / top * 100))
+            parts.append(
+                f'<div class="dv-edge-chip {d}">'
+                f'<span class="ec-player">{store._esc(r["Player"])}</span>'
+                f'<span class="ec-stat">{store._esc(r["Stat"])}</span>'
+                f'<span class="ec-nums">{r["Model"]:g} '
+                f'<span class="ec-vs">vs</span> {r["Line"]:g} &middot; '
+                f'<span class="ec-lean-{d}">{r["Lean"]}</span></span>'
+                f'<span class="ec-bar"><i style="width:{w}%"></i></span>'
+                f"</div>")
+        n_more = len(strip) - len(chips)
+        if n_more > 0:
+            parts.append(f'<span class="dv-edge-more">+{n_more} more</span>')
+        st.markdown(f'<div class="dv-edge-strip">{"".join(parts)}</div>',
+                    unsafe_allow_html=True)
+
+    # Full ledger: same renderer/columns/order as the Props page (|edge| desc).
+    st.markdown(store.html_df(table, label_cols=3, hero=("Edge",)),
+                unsafe_allow_html=True)
+    saved = props.saved_at_et(lines.attrs.get("saved_at"))
+    note = f"{meta['matched']} posted line(s) for this game"
+    if saved:
+        note += f" · lines saved {saved}"
+    note += (" · model means vs posted lines, informational, "
+             "not a wager recommendation.")
+    st.caption(note)
+
+
 # ── Try the generated predictions first ──────────────────────────────────────
 preds = store.load_predictions(date)
 meta = store.load_slate_meta(date)
@@ -103,6 +158,10 @@ if has_numbers and meta:
         _render_side(side_df, t.get("abbr", SENTINEL), t.get("probable"),
                      t.get("lineup_status", "projected"))
         st.divider()
+    try:
+        _render_market_board(gp, date)
+    except Exception:  # noqa: BLE001 — the market board must never break the game view
+        pass
     st.caption("Every number is an expected value, the mean of a distribution, "
                "not a prediction of what will happen. See the About page.")
     render_footer()

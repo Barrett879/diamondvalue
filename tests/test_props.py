@@ -56,6 +56,37 @@ def test_composite_stat_sums_columns():
     assert abs(table.iloc[0]["Model"] - 2.2) < 1e-9
 
 
+def test_save_load_lines_roundtrip(tmp_path, monkeypatch):
+    from mlblib import cache
+    monkeypatch.setattr(cache, "DATA_CACHE", tmp_path, raising=False)
+    monkeypatch.setattr(props.cache, "dc_path",
+                        lambda name: tmp_path / name)
+    lines = pd.DataFrame([
+        {"name": "Ketel Marte", "team": "AZ", "stat_type": "Total Bases",
+         "line": 1.5, "start_time": None},
+    ])
+    assert props.load_lines("2026-07-11") is None      # nothing saved yet
+    props.save_lines("2026-07-11", lines)
+    back = props.load_lines("2026-07-11")
+    assert back is not None and len(back) == 1
+    assert back["line"].iloc[0] == 1.5
+    assert back.attrs.get("saved_at")                  # freshness stamp present
+    # Re-saving identical content keeps the original timestamp.
+    first = back.attrs["saved_at"]
+    props.save_lines("2026-07-11", lines)
+    assert props.load_lines("2026-07-11").attrs["saved_at"] == first
+    # Empty / None input is a no-op (no crash, no file churn).
+    props.save_lines("2026-07-11", pd.DataFrame())
+    props.save_lines("2026-07-11", None)
+
+
+def test_saved_at_et_formats_and_tolerates_junk():
+    assert props.saved_at_et(None) == ""
+    assert props.saved_at_et("not-a-date") == ""
+    out = props.saved_at_et("2026-07-12T06:55:00+00:00")
+    assert out.endswith("ET") and ":" in out
+
+
 def test_parse_json_and_list():
     payload = {
         "data": [{"type": "projection", "attributes": {

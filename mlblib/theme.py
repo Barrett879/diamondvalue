@@ -338,6 +338,36 @@ COMMON_CSS = """
     }
     .dv-slate-status.s-posted::before  { background: var(--value-good); }
     .dv-slate-status.s-partial::before { background: var(--amber); }
+
+    /* Model-vs-board edge strip (Game page PrizePicks section). Teal = model
+       over the line, amber = under -- direction only, NOT a bet win/loss. */
+    .dv-edge-strip { display: flex; flex-wrap: wrap; gap: 0.5rem;
+        margin: 0.35rem 0 0.9rem; }
+    .dv-edge-chip {
+        display: flex; flex-direction: column; gap: 0.15rem; min-width: 140px;
+        flex: 0 1 auto; padding: 0.5rem 0.7rem; background: var(--panel);
+        border: 1px solid var(--panel-line); border-left: 3px solid var(--panel-line);
+        border-radius: 10px; box-shadow: var(--shadow-card);
+    }
+    .dv-edge-chip.over  { border-left-color: var(--accent-teal); }
+    .dv-edge-chip.under { border-left-color: var(--amber); }
+    .ec-player { font-family: 'Space Grotesk', sans-serif; font-weight: 600;
+        font-size: 0.9rem; color: var(--fg-1); line-height: 1.15; }
+    .ec-stat { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em;
+        text-transform: uppercase; color: var(--fg-5); }
+    .ec-nums { font-size: 0.82rem; color: var(--fg-2);
+        font-variant-numeric: tabular-nums; }
+    .ec-nums .ec-vs { color: var(--fg-5); font-size: 0.72rem; padding: 0 0.1rem; }
+    .ec-lean-over  { color: var(--accent-teal); font-weight: 700; }
+    .ec-lean-under { color: var(--amber); font-weight: 700; }
+    .ec-bar { position: relative; height: 4px; border-radius: 999px;
+        background: var(--hairline); margin-top: 0.3rem; overflow: hidden; }
+    .ec-bar > i { position: absolute; left: 0; top: 0; bottom: 0; display: block;
+        border-radius: 999px; }
+    .dv-edge-chip.over  .ec-bar > i { background: var(--accent-teal); }
+    .dv-edge-chip.under .ec-bar > i { background: var(--amber); }
+    .dv-edge-more { align-self: center; color: var(--fg-4); font-size: 0.8rem;
+        font-weight: 600; padding: 0 0.4rem; }
     a.dv-back {
         display: inline-block; color: var(--accent-teal); text-decoration: none;
         font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem;
