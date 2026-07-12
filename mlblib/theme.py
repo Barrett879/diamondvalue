@@ -70,6 +70,8 @@ THEME_BASE_CSS = """
         --amber:       #f0b35b;
         /* elevation + table polish */
         --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.35);
+        --shadow-hover: 0 10px 30px -8px rgba(0, 0, 0, 0.55);
+        --rail-lift: 22%;   /* lifts dark team navies off the near-black bg */
         --row-tint: rgba(255, 255, 255, 0.025);
         --bar-tint: rgba(22, 212, 193, 0.16);
     }
@@ -156,7 +158,9 @@ THEME_LIGHT_CSS = """
         --purple:      #7d3fa8;
         --blue:        #2471a3;
         --sky:         #146c94;
-        --shadow-card: 0 1px 2px rgba(20,22,40,.06), 0 4px 14px rgba(20,22,40,.07);
+        --shadow-card: 0 1px 2px rgba(20,22,40,.05);   /* flat-premium: whisper at rest */
+        --shadow-hover: 0 8px 24px rgba(20,22,40,.12); /* bloom on hover */
+        --rail-lift: 0%;   /* true team hue on white */
         --row-tint: rgba(20, 22, 40, 0.028);
         --bar-tint: rgba(15, 174, 157, 0.15);
     }
@@ -263,7 +267,9 @@ COMMON_CSS = """
 
     /* Brand + hero */
     .dv-brand {
-        font-size: 2.1rem; font-weight: 700; letter-spacing: -0.02em;
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: clamp(2rem, 5vw, 2.7rem); font-weight: 700;
+        letter-spacing: -0.03em; line-height: 1.0;
         color: var(--fg-1); margin: 0 0 0.1rem;
     }
     .dv-brand .accent { color: var(--accent-teal); }
@@ -271,6 +277,52 @@ COMMON_CSS = """
         color: var(--fg-4); font-size: 0.82rem; margin-bottom: 0.6rem;
         font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
     }
+
+    /* Editorial masthead (home slate) */
+    .dv-masthead { margin: 0.2rem 0 0.2rem; }
+    .dv-mast-rule { position: relative; height: 1px; background: var(--panel-line);
+        margin-bottom: 0.9rem; }
+    .dv-mast-rule::before { content: ""; position: absolute; left: 0; top: -1px;
+        width: 44px; height: 3px; background: var(--accent-teal); }
+    .dv-mast-row { display: flex; justify-content: space-between;
+        align-items: flex-end; gap: 1.25rem; flex-wrap: wrap; }
+    .dv-kicker { display: flex; align-items: center; font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700; font-size: 0.68rem; letter-spacing: 0.14em;
+        text-transform: uppercase; color: var(--fg-4); margin-bottom: 0.45rem; }
+    .dv-diamond { width: 6px; height: 6px; background: var(--accent-teal);
+        transform: rotate(45deg); margin-right: 0.5rem; flex: none; }
+    .dv-mast-summary { display: flex; align-items: flex-end; margin-left: auto; }
+    .dv-sum { padding: 0 0.95rem; text-align: right; }
+    .dv-sum + .dv-sum { border-left: 1px solid var(--panel-line); }
+    .dv-sum:last-child { padding-right: 0; }
+    .dv-sum-num { font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+        font-size: 1.2rem; color: var(--fg-1); font-variant-numeric: tabular-nums;
+        line-height: 1.1; white-space: nowrap; }
+    .dv-sum-lab { font-size: 0.57rem; font-weight: 700; letter-spacing: 0.1em;
+        text-transform: uppercase; color: var(--fg-5); margin-top: 0.2rem; }
+    .dv-deck { color: var(--fg-3); font-size: 0.95rem; line-height: 1.5;
+        max-width: 62ch; margin: 0.75rem 0 0; }
+    @media (max-width: 640px) { .dv-mast-summary { margin: 0.8rem 0 0; }
+        .dv-sum:first-child { padding-left: 0; } }
+
+    /* Slate-head divider */
+    .dv-slate-head { display: flex; justify-content: space-between;
+        align-items: baseline; gap: 1rem; flex-wrap: wrap;
+        padding-bottom: 0.5rem; border-bottom: 1px solid var(--panel-line);
+        margin: 1.5rem 0 0.9rem; }
+    .dv-slate-count { font-family: 'Space Grotesk', sans-serif; color: var(--fg-3);
+        font-size: 0.95rem; }
+    .dv-slate-count b { font-size: 1.5rem; font-weight: 700; color: var(--fg-1);
+        font-variant-numeric: tabular-nums; margin-right: 0.2rem; }
+    .dv-slate-count .sep { color: var(--fg-5); margin: 0 0.4rem; }
+    .dv-slate-count .date { color: var(--fg-5); }
+    .dv-legend { display: flex; gap: 0.9rem; flex-wrap: wrap; }
+    .dv-legend span { display: inline-flex; align-items: center; gap: 0.34rem;
+        font-size: 0.7rem; color: var(--fg-5); }
+    .dv-legend i { width: 6px; height: 6px; border-radius: 50%; flex: none;
+        background: var(--fg-6); }
+    .dv-legend .lg-set  i { background: var(--value-good); }
+    .dv-legend .lg-part i { background: var(--amber); }
     .dv-badge {
         display: inline-block; font-size: 0.72rem; font-weight: 700;
         padding: 0.1rem 0.5rem; border-radius: 999px; letter-spacing: 0.02em;
@@ -296,37 +348,69 @@ COMMON_CSS = """
     .dv-game-time { color: var(--fg-3); font-size: 0.9rem; }
     .dv-game-arrow { color: var(--accent-teal); font-weight: 700; }
 
-    /* Slate grid: square game cards, 6 across, away stacked over home */
+    /* Slate grid: square cards, 6 across, team-color split stripe + duotone */
     .dv-slate-grid {
         display: grid; grid-template-columns: repeat(6, 1fr);
-        gap: 0.7rem; margin: 0.4rem 0 1.2rem;
+        gap: 0.8rem; margin: 0.2rem 0 1.2rem;
     }
     @media (max-width: 1080px) { .dv-slate-grid { grid-template-columns: repeat(4, 1fr); } }
     @media (max-width: 760px)  { .dv-slate-grid { grid-template-columns: repeat(3, 1fr); } }
     @media (max-width: 500px)  { .dv-slate-grid { grid-template-columns: repeat(2, 1fr); } }
     a.dv-slate-card {
+        position: relative; overflow: hidden;
         display: flex; flex-direction: column; align-items: center;
-        justify-content: center; aspect-ratio: 1 / 1; padding: 0.55rem;
+        justify-content: center; aspect-ratio: 1 / 1;
+        padding: 0.8rem 0.55rem 0.6rem;
         background: var(--panel); border: 1px solid var(--panel-line);
-        border-radius: 14px; text-decoration: none; text-align: center;
+        border-radius: 12px; text-decoration: none; text-align: center;
         box-shadow: var(--shadow-card);
-        transition: border-color .12s, transform .12s, box-shadow .12s;
+        transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
+    }
+    /* Top split stripe: away | 1px seam | home. Plain fallback, lifted when color-mix. */
+    a.dv-slate-card::before {
+        content: ""; position: absolute; inset: 0 0 auto 0; height: 4px;
+        transition: height .14s ease;
+        background: linear-gradient(90deg,
+            var(--away, var(--fg-5)) 0 calc(50% - .5px),
+            var(--panel-line) calc(50% - .5px) calc(50% + .5px),
+            var(--home, var(--fg-5)) calc(50% + .5px) 100%);
+    }
+    @supports (color: color-mix(in srgb, red, white)) {
+        a.dv-slate-card::before {
+            background: linear-gradient(90deg,
+                color-mix(in srgb, var(--away, var(--fg-5)), #fff var(--rail-lift)) 0 calc(50% - .5px),
+                var(--panel-line) calc(50% - .5px) calc(50% + .5px),
+                color-mix(in srgb, var(--home, var(--fg-5)), #fff var(--rail-lift)) calc(50% + .5px) 100%);
+        }
+        a.dv-slate-card {
+            background: linear-gradient(150deg,
+                color-mix(in srgb, var(--away, transparent) 6%, var(--panel)),
+                color-mix(in srgb, var(--home, transparent) 6%, var(--panel)));
+        }
     }
     a.dv-slate-card:hover {
         border-color: var(--accent-teal); transform: translateY(-2px);
+        box-shadow: var(--shadow-hover);
+    }
+    a.dv-slate-card:hover::before { height: 5px; }
+    a.dv-slate-card:focus-visible { outline: 2px solid var(--accent-teal); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+        a.dv-slate-card { transition: none; }
+        a.dv-slate-card:hover { transform: none; }
     }
     .dv-slate-away, .dv-slate-home {
-        font-family: 'Space Grotesk', sans-serif; font-size: 1.4rem;
+        font-family: 'Space Grotesk', sans-serif; font-size: 1.5rem;
         font-weight: 700; color: var(--fg-1); line-height: 1.1;
         letter-spacing: -0.01em;
     }
     .dv-slate-at {
-        color: var(--accent-teal); font-weight: 600; font-size: 0.82rem;
-        margin: 0.12rem 0;
+        color: var(--fg-5); font-weight: 600; font-size: 0.72rem;
+        margin: 0.1rem 0;
     }
     .dv-slate-time {
-        color: var(--fg-3); font-size: 0.74rem; font-weight: 600;
-        margin-top: 0.55rem; letter-spacing: 0.02em; white-space: nowrap;
+        color: var(--fg-3); font-size: 0.72rem; font-weight: 600;
+        margin-top: 0.5rem; letter-spacing: 0.01em; white-space: nowrap;
+        font-variant-numeric: tabular-nums;
     }
     .dv-slate-status {
         display: inline-flex; align-items: center; gap: 0.32rem;
@@ -338,6 +422,24 @@ COMMON_CSS = """
     }
     .dv-slate-status.s-posted::before  { background: var(--value-good); }
     .dv-slate-status.s-partial::before { background: var(--amber); }
+
+    /* Date control bar (keyed container): chevrons + date + Yesterday/Today */
+    .st-key-dv_datebar [data-testid="stHorizontalBlock"] { align-items: flex-end; }
+    .st-key-dv_datebar [data-testid="stDateInput"] label {
+        font-family: 'Space Grotesk', sans-serif; font-size: 0.62rem;
+        font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+        color: var(--fg-5); }
+    .st-key-dv_datebar [data-testid="stDateInput"] div[data-baseweb="input"] {
+        border-radius: 10px; }
+    .st-key-dv_datebar [data-testid="stButton"] button {
+        height: 2.35rem; font-size: 0.82rem; font-weight: 600;
+        border-radius: 10px !important; }
+    .st-key-step_prev button, .st-key-step_next button {
+        padding: 0 0.5rem !important; font-size: 1.1rem !important;
+        font-weight: 700 !important; line-height: 1 !important; }
+    .st-key-jump_today button {
+        border-color: var(--accent-teal) !important; color: var(--accent-teal) !important; }
+    .dv-bar-rule { height: 1px; background: var(--panel-line); margin: 0.5rem 0 0.2rem; }
 
     /* Model-vs-board edge strip (Game page PrizePicks section). Teal = model
        over the line, amber = under -- direction only, NOT a bet win/loss. */
