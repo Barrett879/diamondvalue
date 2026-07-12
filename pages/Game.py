@@ -69,8 +69,13 @@ def _badge(status: str) -> str:
     return f'<span class="dv-badge {status}">{label}</span>'
 
 
+def _bat_table(df, pbn):
+    return (store.html_expandable_batter_table(df, pbn) if pbn
+            else store.html_batter_table(df))
+
+
 def _render_side(side_df: pd.DataFrame, team_name: str, probable: str | None,
-                 status: str):
+                 status: str, pbn: dict):
     sp = f"SP: <b>{probable}</b>" if probable else "SP: TBD"
     st.markdown(
         f'<div class="dv-team"><span class="dv-team-name">{team_name}</span>'
@@ -80,24 +85,27 @@ def _render_side(side_df: pd.DataFrame, team_name: str, probable: str | None,
     if not pit_df.empty:
         st.markdown('<div class="dv-eyebrow">Starting pitcher &middot; expected</div>',
                     unsafe_allow_html=True)
-        st.markdown(store.html_pitcher_table(pit_df), unsafe_allow_html=True)
+        tbl = (store.html_expandable_pitcher_table(pit_df, pbn) if pbn
+               else store.html_pitcher_table(pit_df))
+        st.markdown(tbl, unsafe_allow_html=True)
     starters = side_df[(side_df["role"] == "bat") & (side_df["is_bench"] == False)].sort_values("slot")  # noqa: E712
     bench = side_df[(side_df["role"] == "bat") & (side_df["is_bench"] == True)]  # noqa: E712
     st.markdown('<div class="dv-eyebrow">Lineup &middot; expected per game</div>',
                 unsafe_allow_html=True)
-    st.markdown(store.html_batter_table(starters), unsafe_allow_html=True)
+    st.markdown(_bat_table(starters, pbn), unsafe_allow_html=True)
     if not bench.empty:
         st.markdown(f'<div class="dv-eyebrow">Bench ({len(bench)}) &middot; '
                     'expected if he starts</div>', unsafe_allow_html=True)
-        st.markdown(store.html_batter_table(bench), unsafe_allow_html=True)
+        st.markdown(_bat_table(bench, pbn), unsafe_allow_html=True)
 
 
 def _render_market_section(gp: pd.DataFrame, date: str) -> None:
-    """The one-stop PrizePicks section: persist any freshly-entered lines,
-    show this game's model-vs-line board, and offer the line input inline
-    (expanded when nothing is loaded yet)."""
-    props_ui.resolve_and_persist(date)
-    matched = props_ui.render_board(gp, date, scope_label="this game")
+    """The one-stop PrizePicks section: this game's biggest-gaps highlight
+    strip (the per-player detail now lives in the expandable roster rows), and
+    the line input inline (expanded when nothing is loaded yet). Lines are
+    already persisted by the caller so the roster expansions reflect them."""
+    matched = props_ui.render_board(gp, date, scope_label="this game",
+                                    show_ledger=False)
     with st.expander("Add / update PrizePicks lines", expanded=matched == 0):
         props_ui.render_input(date)
 
@@ -118,6 +126,13 @@ if has_numbers and meta:
     et = game_time_et(m.get("gameDate"))
     away, home = m.get("away", "AWY"), m.get("home", "HOM")
     _hero(away, home, date, et)
+    # Persist any freshly-entered lines FIRST, so the expandable roster rows
+    # reflect the latest paste; then group them by player for the rows.
+    props_ui.resolve_and_persist(date)
+    pbn = props_ui.props_by_name(gp, date)
+    if pbn:
+        st.caption("Players with a teal count have posted PrizePicks lines; "
+                   "click the row to see them.")
     # Stack the two teams full-width so every predicted column is readable
     # (side-by-side would squeeze the 17-column batter tables).
     tinfo = m.get("teams", {})
@@ -125,7 +140,7 @@ if has_numbers and meta:
         side_df = gp[gp["isHome"] == is_home]
         t = tinfo.get(key, {})
         _render_side(side_df, t.get("abbr", SENTINEL), t.get("probable"),
-                     t.get("lineup_status", "projected"))
+                     t.get("lineup_status", "projected"), pbn)
         st.divider()
     try:
         _render_market_section(gp, date)

@@ -440,6 +440,53 @@ COMMON_CSS = """
         border-color: var(--accent-teal) !important; color: var(--accent-teal) !important; }
     .dv-bar-rule { height: 1px; background: var(--panel-line); margin: 0.5rem 0 0.2rem; }
 
+    /* Expandable stat table: each player's row opens to their PrizePicks lines.
+       Grid columns come from an inline --xt so header + rows stay aligned. */
+    .dv-xtable { min-width: 100%; font-variant-numeric: tabular-nums;
+        font-size: 0.86rem; }
+    .dv-xhead, .dv-xrow > summary, .dv-xrow.norow {
+        display: grid; grid-template-columns: var(--xt); align-items: center;
+        gap: 0.4rem; padding: 0.5rem 0.75rem; }
+    .dv-xhead {
+        position: sticky; top: 0; z-index: 1; background: var(--panel-2);
+        font-family: 'Space Grotesk', sans-serif; font-weight: 600;
+        font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase;
+        color: var(--fg-4); border-bottom: 1px solid var(--panel-line); }
+    .dv-xhead span, .dv-xrow span { text-align: right; white-space: nowrap;
+        overflow: hidden; text-overflow: ellipsis; }
+    .dv-xhead .l, .dv-xrow .l { text-align: left; }
+    .dv-xrow { border-bottom: 1px solid var(--hairline-soft); }
+    .dv-xtable > .dv-xrow:last-child { border-bottom: none; }
+    .dv-xrow span.name { color: var(--fg-1); font-weight: 600; }
+    .dv-xrow span.slot { color: var(--fg-5); }
+    .dv-xrow span.hero { color: var(--fg-1); font-weight: 600; }
+    .dv-xrow > summary { cursor: pointer; list-style: none; }
+    .dv-xrow > summary::-webkit-details-marker { display: none; }
+    .dv-xrow > summary:hover { background: var(--panel-hover); }
+    .dv-xrow[open] > summary { background: var(--row-tint); }
+    .dv-xrow.norow:nth-child(even), .dv-xrow:nth-child(even) > summary {
+        background: var(--row-tint); }
+    .dv-xrow.norow:nth-child(even):hover { background: var(--row-tint); }
+    /* the props-count caret at row end: teal pill when the player has lines */
+    .xcaret { text-align: center !important; }
+    .xcaret.has {
+        display: inline-block; min-width: 1.15rem; padding: 0.05rem 0.3rem;
+        border-radius: 999px; background: var(--accent-teal); color: #fff;
+        font-size: 0.66rem; font-weight: 700; line-height: 1.3; }
+    .dv-xrow[open] .xcaret.has { background: var(--fg-1); }
+    /* expanded panel: this player's posted lines vs our model */
+    .dv-xbody { padding: 0.15rem 0.9rem 0.65rem; background: var(--row-tint); }
+    .dv-pline { display: flex; align-items: center; gap: 0.7rem;
+        padding: 0.35rem 0; border-bottom: 1px solid var(--hairline-soft);
+        font-size: 0.85rem; }
+    .dv-pline:last-child { border-bottom: none; }
+    .dv-pline .ps { font-weight: 600; color: var(--fg-2); min-width: 8.5rem; }
+    .dv-pline .pv { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+    .dv-pline .pv i { color: var(--fg-5); font-style: normal; padding: 0 0.2rem; }
+    .dv-pline .pe { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .dv-pline .pe.over  { color: var(--accent-teal); }
+    .dv-pline .pe.under { color: var(--amber); }
+
     /* Model-vs-board edge strip (Game page PrizePicks section). Teal = model
        over the line, amber = under -- direction only, NOT a bet win/loss. */
     .dv-edge-strip { display: flex; flex-wrap: wrap; gap: 0.5rem;

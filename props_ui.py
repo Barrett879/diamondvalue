@@ -62,8 +62,24 @@ def resolve_and_persist(date_iso: str):
     return props.load_lines(date_iso)       # fall back to a prior save
 
 
+def props_by_name(scope_preds: pd.DataFrame, date_iso: str) -> dict:
+    """{fullName: [ {Stat, Model, Line, Edge, Lean}, ... ]} for the players in
+    scope_preds that have a posted, mappable line. Feeds the expandable roster
+    rows on the game page."""
+    lines = props.load_lines(date_iso)
+    if lines is None or lines.empty:
+        return {}
+    table, _ = props.compare(lines, scope_preds)
+    out: dict = {}
+    for _, r in table.iterrows():
+        out.setdefault(r["Player"], []).append(
+            {"Stat": r["Stat"], "Model": r["Model"], "Line": r["Line"],
+             "Edge": r["Edge"], "Lean": r["Lean"]})
+    return out
+
+
 def render_board(scope_preds: pd.DataFrame, date_iso: str,
-                 scope_label: str = "this game") -> int:
+                 scope_label: str = "this game", show_ledger: bool = True) -> int:
     """Strip of the biggest gaps over the full model-vs-line ledger, for the
     given predictions frame (one game, or the whole slate). Both rank by
     ABSOLUTE gap so the leading chip is the ledger's top row. Renders nothing
@@ -104,8 +120,9 @@ def render_board(scope_preds: pd.DataFrame, date_iso: str,
         st.markdown(f'<div class="dv-edge-strip">{"".join(parts)}</div>',
                     unsafe_allow_html=True)
 
-    st.markdown(store.html_df(table, label_cols=3, hero=("Edge",)),
-                unsafe_allow_html=True)
+    if show_ledger:
+        st.markdown(store.html_df(table, label_cols=3, hero=("Edge",)),
+                    unsafe_allow_html=True)
     saved = props.saved_at_et(lines.attrs.get("saved_at"))
     note = f"{meta['matched']} posted line(s) for {scope_label}"
     if saved:

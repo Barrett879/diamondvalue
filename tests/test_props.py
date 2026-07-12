@@ -87,6 +87,25 @@ def test_saved_at_et_formats_and_tolerates_junk():
     assert out.endswith("ET") and ":" in out
 
 
+def test_expandable_table_only_marks_players_with_props():
+    from mlblib import store
+    df = pd.DataFrame([
+        {"fullName": "Ketel Marte", "role": "bat", "slot": 1, "PA": 4.0,
+         "b1": .6, "b2": .2, "b3": .0, "HR": .2, "BB": .3, "HBP": 0, "SO": .8,
+         "R": .6, "RBI": .5, "SB": .1, "H": 1.0, "TB": 2.0},
+        {"fullName": "Alek Thomas", "role": "bat", "slot": 2, "PA": 3.5,
+         "b1": .5, "b2": .1, "b3": .0, "HR": .1, "BB": .2, "HBP": 0, "SO": .7,
+         "R": .4, "RBI": .3, "SB": .1, "H": .8, "TB": 1.2},
+    ])
+    pbn = {"Ketel Marte": [{"Stat": "Total Bases", "Model": 2.0, "Line": 1.5,
+                           "Edge": 0.5, "Lean": "Over"}]}
+    html = store.html_expandable_batter_table(df, pbn)
+    assert html.count("<details") == 1        # only Marte is expandable
+    assert "norow" in html                    # Thomas stays a plain row
+    assert "Total Bases" in html and "Over" in html
+    assert 'class="xcaret has"' in html        # the teal count badge
+
+
 def test_parse_prizepicks_board_text():
     board = (
         "Trending\n30.8K\nJames Wood\nWSH - OF\nJames Wood\nvs NYY 47m 24s\n\n"

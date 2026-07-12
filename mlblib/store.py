@@ -128,6 +128,73 @@ def html_pitcher_table(df: pd.DataFrame) -> str:
     return html_stat_table(format_pitcher_table(df), label_cols=1, hero=("K",))
 
 
+# ── Expandable stat tables (each player's row opens to their PrizePicks lines) ─
+def _col_template(n_cols: int, label_cols: int) -> str:
+    """CSS grid template matching the stat columns, plus a trailing caret col."""
+    if label_cols >= 2:
+        return f"2.6rem minmax(5rem, 1.7fr) repeat({n_cols - 2}, 1fr) 1.6rem"
+    return f"minmax(6rem, 1.7fr) repeat({n_cols - 1}, 1fr) 1.6rem"
+
+
+def _props_body(props: list) -> str:
+    """The expanded panel for one player: their posted lines vs our model."""
+    lines = []
+    for p in props:
+        edge = float(p["Edge"])
+        d = "over" if edge > 0 else ("under" if edge < 0 else "")
+        lines.append(
+            f'<div class="dv-pline">'
+            f'<span class="ps">{_esc(p["Stat"])}</span>'
+            f'<span class="pv">{float(p["Model"]):g} <i>vs</i> {float(p["Line"]):g}</span>'
+            f'<span class="pe {d}">{edge:+g} {_esc(p["Lean"])}</span>'
+            f"</div>")
+    return f'<div class="dv-xbody">{"".join(lines)}</div>'
+
+
+def html_expandable_stat_table(str_df: pd.DataFrame, label_cols: int,
+                               hero: tuple, props_by_name: dict) -> str:
+    """Like html_stat_table, but each player whose name is in `props_by_name`
+    becomes a <details> that opens to their PrizePicks lines. Players without
+    posted lines stay plain rows. Native <details> = no JS."""
+    cols = list(str_df.columns)
+    name_idx = label_cols - 1
+    name_col = cols[name_idx]
+    tmpl = _col_template(len(cols), label_cols)
+    head = "".join(
+        (f'<span class="l">{_esc(c)}</span>' if i < label_cols else f'<span>{_esc(c)}</span>')
+        for i, c in enumerate(cols)) + "<span></span>"
+    rows = []
+    for _, r in str_df.iterrows():
+        cells = []
+        for i, c in enumerate(cols):
+            if i < label_cols:
+                cls = "name l" if i == name_idx else "slot l"
+            else:
+                cls = "hero" if c in hero else ""
+            cells.append(f'<span class="{cls}">{_esc(r[c])}</span>')
+        props = props_by_name.get(str(r[name_col]))
+        if props:
+            cells.append(f'<span class="xcaret has">{len(props)}</span>')
+            rows.append(f'<details class="dv-xrow"><summary>{"".join(cells)}'
+                        f"</summary>{_props_body(props)}</details>")
+        else:
+            cells.append('<span class="xcaret"></span>')
+            rows.append(f'<div class="dv-xrow norow">{"".join(cells)}</div>')
+    return (f'<div class="dv-table-wrap"><div class="dv-xtable" '
+            f'style="--xt:{tmpl}"><div class="dv-xhead">{head}</div>'
+            f'{"".join(rows)}</div></div>')
+
+
+def html_expandable_batter_table(df: pd.DataFrame, props_by_name: dict) -> str:
+    return html_expandable_stat_table(format_batter_table(df), 2, ("HR", "TB"),
+                                      props_by_name)
+
+
+def html_expandable_pitcher_table(df: pd.DataFrame, props_by_name: dict) -> str:
+    return html_expandable_stat_table(format_pitcher_table(df), 1, ("K",),
+                                      props_by_name)
+
+
 def html_df(df: pd.DataFrame, label_cols: int = 1, hero: tuple = (),
             rename: dict | None = None) -> str:
     """Themed render of an arbitrary DataFrame (floats to 3 dp, ints plain).
