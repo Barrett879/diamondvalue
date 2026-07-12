@@ -39,11 +39,13 @@ BOOKMARKLET = (
 
 
 def resolve_and_persist(date_iso: str):
-    """Current lines from any source, in priority order -- a live pull, the
-    pasted text (JSON or list), or the previously-saved file (sticky across
-    reloads) -- persisted so every page/game reads the same set. Returns the
-    lines DataFrame or None. Safe to call at the top of a page before the input
-    widgets render (it reads their committed session_state values)."""
+    """Current lines from any source -- a live pull or the pasted text (JSON,
+    board, or list) -- MERGED into the previously-saved set and persisted, so
+    every page/game reads the same accumulating board. PrizePicks has no All
+    tab, so each paste ADDS to what is saved (a re-paste of the same tab just
+    refreshes those lines). Returns the merged frame or None. Safe to call at
+    the top of a page before the input widgets render (it reads their committed
+    session_state values). 'Clear all' (clear_lines) resets the set."""
     lines = None
     payload = st.session_state.get("pp_payload") or fp.load_raw(date_iso)
     if payload:
@@ -57,8 +59,9 @@ def resolve_and_persist(date_iso: str):
             got = props.parse_any(txt)   # JSON, board text, or a simple list
             lines = got if (got is not None and not got.empty) else None
     if lines is not None and not lines.empty:
-        props.save_lines(date_iso, lines)   # fresh input -> persist slate-wide
-        return lines
+        merged = props.merge_lines(props.load_lines(date_iso), lines)
+        props.save_lines(date_iso, merged)   # accumulate across stat tabs
+        return merged
     return props.load_lines(date_iso)       # fall back to a prior save
 
 
@@ -157,6 +160,15 @@ def render_board(scope_preds: pd.DataFrame, date_iso: str,
     return meta["matched"]
 
 
+def _clear_lines(date_iso: str) -> None:
+    """'Clear all' button callback: drop every accumulated line for the date and
+    reset the input state. Runs before the rerun, so clearing pp_paste here also
+    stops resolve_and_persist from re-merging the last paste back in."""
+    props.clear_lines(date_iso)
+    st.session_state["pp_paste"] = ""
+    st.session_state["pp_payload"] = None
+
+
 FEED_URL = ("https://api.prizepicks.com/projections?"
             "league_id=2&per_page=250&single_stat=true")
 
@@ -173,28 +185,38 @@ def render_input(date_iso: str) -> None:
         "PrizePicks feed &#8599;</a> in a new tab (sign in to PrizePicks first "
         "if it asks).<br>"
         "2. Select all (&#8984;A) and copy (&#8984;C).<br>"
-        "3. Paste it in the box below and click **Compare**.",
+        "3. Paste it in the box below and click **Add these lines** (repeat per "
+        "PrizePicks stat tab, they accumulate).",
         unsafe_allow_html=True)
     st.text_area("PrizePicks JSON or a Name, Stat, Line list", height=170,
                  key="pp_paste", placeholder=(
                      "Paste the copied feed here, or type a simple list:\n"
                      "Ketel Marte, Total Bases, 1.5\n"
                      "Zac Gallen, Pitcher Strikeouts, 6.5"))
-    compared = st.button("Compare pasted lines", type="primary", key="pp_compare")
-    st.caption("Tip: after pasting, click **Compare** or click anywhere outside "
-               "the box (pressing Enter alone just adds a line). Lines apply to "
-               "every game on the slate.")
-    # Immediate feedback: a toast on the Compare click plus a persistent note.
+    # The paste is already merged into the saved set by resolve_and_persist at
+    # the top of the page, so n_saved here is the running total across tabs.
     saved = props.load_lines(date_iso)
     n_saved = 0 if saved is None or saved.empty else len(saved)
+    c_add, c_clear = st.columns([2.4, 1], gap="small")
+    with c_add:
+        compared = st.button("Add these lines", type="primary", key="pp_compare",
+                             use_container_width=True)
+    with c_clear:
+        st.button("Clear all", key="pp_clear", on_click=_clear_lines,
+                  args=(date_iso,), use_container_width=True,
+                  disabled=n_saved == 0,
+                  help="Remove every line you have added for this date")
+    st.caption("PrizePicks has no All tab, so each paste ADDS to your lines "
+               "(re-pasting a tab just refreshes it, no duplicates). Paste one "
+               "stat tab, click Add, switch tabs, repeat. You can skip the "
+               "Fantasy Score, 1st-Inning and Combo tabs, those are not "
+               "projected. Lines apply to every game on the slate.")
     if compared:
-        if n_saved:
-            st.toast(f"{n_saved} PrizePicks lines loaded.")
-        else:
-            st.toast("Couldn't read any lines from that paste.")
+        st.toast(f"{n_saved} PrizePicks line(s) loaded." if n_saved
+                 else "Couldn't read any lines from that paste.")
     if n_saved:
-        st.success(f"{n_saved} lines loaded and saved. The comparison shows "
-                   "above and on every game page.")
+        st.success(f"{n_saved} PrizePicks line(s) loaded across the tabs you have "
+                   "added. They show above and on every game page.")
     elif (st.session_state.get("pp_paste") or "").strip():
         st.warning("Couldn't read any lines from that paste. Paste the copied "
                    "PrizePicks board or the feed JSON, or a simple "

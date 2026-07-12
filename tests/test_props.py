@@ -166,6 +166,36 @@ def test_props_meta_no_flag_when_side_offered():
     assert "More &amp; Less" in meta and "not offered" not in meta
 
 
+def test_merge_lines_accumulates_and_dedups():
+    a = pd.DataFrame([
+        {"name": "Ketel Marte", "stat_type": "Total Bases", "line": 1.5},
+        {"name": "Zac Gallen", "stat_type": "Pitcher Strikeouts", "line": 6.5},
+    ])
+    b = pd.DataFrame([
+        {"name": "Ketel Marte", "stat_type": "Total Bases", "line": 2.5},   # moved
+        {"name": "Mookie Betts", "stat_type": "Hits", "line": 0.5},
+    ])
+    m = props.merge_lines(a, b)
+    keyed = {(r["name"], r["stat_type"]): r["line"] for _, r in m.iterrows()}
+    assert len(m) == 3                                    # one dup collapsed
+    assert keyed[("Ketel Marte", "Total Bases")] == 2.5   # newest paste wins
+    assert ("Zac Gallen", "Pitcher Strikeouts") in keyed  # first tab kept
+    assert ("Mookie Betts", "Hits") in keyed              # second tab added
+    assert len(props.merge_lines(None, b)) == 2           # None operands
+    assert len(props.merge_lines(a, None)) == 2
+    assert props.merge_lines(None, None).empty
+
+
+def test_clear_lines(tmp_path, monkeypatch):
+    monkeypatch.setattr(props.cache, "dc_path", lambda name: tmp_path / name)
+    props.save_lines("2026-07-12", pd.DataFrame([
+        {"name": "X", "stat_type": "Hits", "line": 0.5}]))
+    assert props.load_lines("2026-07-12") is not None
+    props.clear_lines("2026-07-12")
+    assert props.load_lines("2026-07-12") is None
+    props.clear_lines("2026-07-12")   # idempotent, no crash
+
+
 def _bat(game, name, **over):
     row = {"gamePk": game, "fullName": name, "role": "bat", "TB": 2.0, "H": 1.0,
            "HR": 0.3, "R": 0.6, "RBI": 0.5, "BB": 0.3, "SO": 0.8, "SB": 0.1,

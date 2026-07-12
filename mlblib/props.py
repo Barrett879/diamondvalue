@@ -283,6 +283,37 @@ def load_lines(date: str) -> pd.DataFrame | None:
     return df
 
 
+def merge_lines(existing: pd.DataFrame | None,
+                new: pd.DataFrame | None) -> pd.DataFrame:
+    """Union two line frames, deduped by (normalized name, stat_type), keeping
+    the NEWEST value for a repeated prop. Lets a user paste one PrizePicks stat
+    tab at a time and accumulate the whole board (there is no All tab), while a
+    re-paste of the same tab just refreshes those lines instead of piling up."""
+    frames = [f for f in (existing, new) if f is not None and not f.empty]
+    if not frames:
+        return pd.DataFrame()
+    if len(frames) == 1:
+        return frames[0].reset_index(drop=True)
+    both = pd.concat(frames, ignore_index=True)
+    key = (both["name"].map(normalize_name) + "|"
+           + both["stat_type"].astype(str).str.strip().str.lower())
+    both = both[~key.duplicated(keep="last")]   # new frame is last -> it wins
+    for c in ("direction", "odds_type"):        # keep string cols clean if mixed
+        if c in both.columns:
+            both[c] = both[c].fillna("")
+    return both.reset_index(drop=True)
+
+
+def clear_lines(date: str) -> None:
+    """Delete the accumulated lines for `date` (the 'Clear all' control)."""
+    p = lines_path(date)
+    try:
+        if p.exists():
+            p.unlink()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def saved_at_et(iso: str | None) -> str:
     """'Mon D, HH:MM ET' for a saved_at ISO-UTC stamp; '' if missing/
     unparseable. The date is always shown so a stale save on a past-date game
