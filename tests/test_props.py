@@ -87,6 +87,28 @@ def test_saved_at_et_formats_and_tolerates_junk():
     assert out.endswith("ET") and ":" in out
 
 
+def test_parse_prizepicks_board_text():
+    board = (
+        "Trending\n30.8K\nJames Wood\nWSH - OF\nJames Wood\nvs NYY 47m 24s\n\n"
+        "7.5\nHitter FS\nLess\nMore\n"
+        "Trending\n30.8K\nJames WoodDemon\nWSH - OF\nJames Wood\n"
+        "vs NYY 47m 24s\n1.5\nTB\nMore\n"
+        "Trending\n13.4K\nCorbin CarrollDemon\nAZ - OF\nCorbin Carroll\n"
+        "@ LAD Sun 1:10pm\n0.5\nWalks\nMore\n"
+        "Trending\n14.5K\nTarik Skubal\nDET - P\nTarik Skubal\n"
+        "vs PHI 52m 24s\n7.5\nKs\nLess\nMore\n")
+    df = props.parse_prizepicks_board(board)
+    # Fantasy Score is skipped; Demon tags stripped; TB/Ks normalized.
+    got = {(r["name"], r["stat_type"], r["line"]) for _, r in df.iterrows()}
+    assert ("James Wood", "Total Bases", 1.5) in got
+    assert ("Corbin Carroll", "Walks", 0.5) in got
+    assert ("Tarik Skubal", "Strikeouts", 7.5) in got
+    assert all(s != "Hitter FS" for _, s, _ in got)    # fantasy score dropped
+    assert all("Demon" not in n for n, _, _ in got)    # payout tag stripped
+    # parse_any routes board text to the board parser.
+    assert len(props.parse_any(board)) == len(df) >= 3
+
+
 def test_parse_json_and_list():
     payload = {
         "data": [{"type": "projection", "attributes": {

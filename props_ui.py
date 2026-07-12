@@ -54,15 +54,8 @@ def resolve_and_persist(date_iso: str):
     if lines is None or lines.empty:
         txt = (st.session_state.get("pp_paste") or "").strip()
         if txt:
-            if txt[:1] in "{[":
-                try:
-                    got = props.parse_prizepicks_json(txt)
-                    lines = got if (got is not None and not got.empty) else None
-                except Exception:  # noqa: BLE001
-                    lines = None
-            if lines is None or lines.empty:
-                got = props.parse_line_list(txt)
-                lines = got if (got is not None and not got.empty) else None
+            got = props.parse_any(txt)   # JSON, board text, or a simple list
+            lines = got if (got is not None and not got.empty) else None
     if lines is not None and not lines.empty:
         props.save_lines(date_iso, lines)   # fresh input -> persist slate-wide
         return lines
@@ -82,6 +75,9 @@ def render_board(scope_preds: pd.DataFrame, date_iso: str,
     table, meta = props.compare(lines, scope_preds)
     if table.empty:
         return 0
+    n = meta["matched"]
+    st.success(f"{n} PrizePicks line{'s' if n != 1 else ''} loaded and compared "
+               f"for {scope_label}.")
     st.markdown('<div class="dv-eyebrow">Model vs the board &middot; '
                 'PrizePicks lines</div>', unsafe_allow_html=True)
 
@@ -143,10 +139,25 @@ def render_input(date_iso: str) -> None:
                      "Paste the copied feed here, or type a simple list:\n"
                      "Ketel Marte, Total Bases, 1.5\n"
                      "Zac Gallen, Pitcher Strikeouts, 6.5"))
-    st.button("Compare pasted lines", type="primary", key="pp_compare")
+    compared = st.button("Compare pasted lines", type="primary", key="pp_compare")
     st.caption("Tip: after pasting, click **Compare** or click anywhere outside "
                "the box (pressing Enter alone just adds a line). Lines apply to "
                "every game on the slate.")
+    # Immediate feedback: a toast on the Compare click plus a persistent note.
+    saved = props.load_lines(date_iso)
+    n_saved = 0 if saved is None or saved.empty else len(saved)
+    if compared:
+        if n_saved:
+            st.toast(f"{n_saved} PrizePicks lines loaded.")
+        else:
+            st.toast("Couldn't read any lines from that paste.")
+    if n_saved:
+        st.success(f"{n_saved} lines loaded and saved. The comparison shows "
+                   "above and on every game page.")
+    elif (st.session_state.get("pp_paste") or "").strip():
+        st.warning("Couldn't read any lines from that paste. Paste the copied "
+                   "PrizePicks board or the feed JSON, or a simple "
+                   "`Name, Stat, Line` list.")
 
     # Best-effort automated pull (usually blocked by PrizePicks; harmless).
     if st.button("Try a live pull instead", key="pp_update",

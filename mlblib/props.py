@@ -143,6 +143,75 @@ def parse_line_list(text: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# Parsing the copied PrizePicks BOARD (the visual page text, not the JSON API).
+# Each prop is a block: [tag] [count] [name(+Demon/Goblin)] [TEAM - POS] [name]
+# [matchup] [line#] [stat] [Less?] [More]. The "TEAM - POS" line is the reliable
+# anchor: the next line is the clean player name, then a matchup, then the line
+# number, then the stat label.
+_BOARD_TEAMPOS = re.compile(r"^[A-Z]{2,4} - [A-Za-z0-9]{1,3}$")
+_BOARD_NUM = re.compile(r"^\d+(\.\d+)?$")
+_BOARD_SUFFIX = re.compile(r"(Demon|Goblin)+$")
+# Board shorthand -> a stat_type string compare() understands.
+_BOARD_ALIAS = {"tb": "Total Bases", "ks": "Strikeouts"}
+# Composite fantasy scores we do not project -- skip so they don't inflate the
+# "stat types we don't project" count.
+_BOARD_SKIP = {"hitter fs", "pitcher fs", "fantasy score", "hitter fantasy score",
+               "pitcher fantasy score"}
+
+
+def parse_prizepicks_board(text: str) -> pd.DataFrame:
+    """Parse the text copied from the PrizePicks board page (not the JSON feed).
+    Anchors on each 'TEAM - POS' line and reads the following name / line /
+    stat; strips Demon/Goblin payout tags and skips fantasy-score props."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    rows = []
+    for i, ln in enumerate(lines):
+        if not _BOARD_TEAMPOS.match(ln) or i + 1 >= len(lines):
+            continue
+        team = ln.split(" - ")[0]
+        name = _BOARD_SUFFIX.sub("", lines[i + 1]).strip()
+        # The line number sits a couple rows down (after the matchup); scan a
+        # small window so an occasional extra row doesn't break alignment.
+        num_i = next((j for j in range(i + 2, min(i + 6, len(lines)))
+                      if _BOARD_NUM.match(lines[j])), None)
+        if num_i is None or num_i + 1 >= len(lines):
+            continue
+        try:
+            line = float(lines[num_i])
+        except ValueError:
+            continue
+        if not np.isfinite(line):
+            continue
+        stat = lines[num_i + 1].strip()
+        key = stat.lower()
+        if key in _BOARD_SKIP or _BOARD_TEAMPOS.match(stat):
+            continue
+        rows.append({"name": name, "team": team,
+                     "stat_type": _BOARD_ALIAS.get(key, stat),
+                     "line": line, "start_time": None})
+    return pd.DataFrame(rows)
+
+
+def parse_any(text: str) -> pd.DataFrame:
+    """Parse pasted lines in whatever shape they arrive: the JSON feed, the
+    copied board page, or a simple 'Name, Stat, Line' list. Returns the first
+    parser that yields rows."""
+    t = (text or "").strip()
+    if not t:
+        return pd.DataFrame()
+    if t[:1] in "{[":
+        try:
+            df = parse_prizepicks_json(t)
+            if df is not None and not df.empty:
+                return df
+        except Exception:  # noqa: BLE001
+            pass
+    df = parse_prizepicks_board(t)
+    if df is not None and not df.empty:
+        return df
+    return parse_line_list(t)
+
+
 def lines_path(date: str):
     return cache.dc_path(f"pp_lines_{date.replace('-', '_')}_v1.json")
 
