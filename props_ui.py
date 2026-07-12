@@ -78,6 +78,25 @@ def props_by_name(scope_preds: pd.DataFrame, date_iso: str) -> dict:
     return out
 
 
+def line_counts_by_game(scope_preds: pd.DataFrame, date_iso: str) -> dict:
+    """{gamePk: number of posted PrizePicks lines that map to a projected stat,
+    summed across BOTH teams in that game}. Feeds the per-card count on the
+    slate ("Dodgers 3 + Diamondbacks 1 -> 4"). A "line" is one posted (player,
+    stat) prop that resolves to a stat we project, so it matches exactly what
+    the game page can show. Empty dict when nothing is loaded, so cards with no
+    lines render no badge."""
+    lines = props.load_lines(date_iso)
+    if (lines is None or lines.empty or scope_preds is None
+            or scope_preds.empty or "gamePk" not in scope_preds.columns):
+        return {}
+    out: dict = {}
+    for gpk, gp in scope_preds.groupby("gamePk"):
+        _, meta = props.compare(lines, gp)
+        if meta["matched"]:
+            out[int(gpk)] = int(meta["matched"])
+    return out
+
+
 def render_board(scope_preds: pd.DataFrame, date_iso: str,
                  scope_label: str = "this game", show_ledger: bool = True) -> int:
     """Strip of the biggest gaps over the full model-vs-line ledger, for the

@@ -421,6 +421,44 @@ COMMON_CSS = """
     }
     .dv-slate-status.s-posted::before  { background: var(--value-good); }
     .dv-slate-status.s-partial::before { background: var(--amber); }
+    /* Per-game count of posted PrizePicks lines that map to a stat we project,
+       summed across BOTH teams. An informational model-vs-market readout, never
+       a wager prompt. A neutral top-LEFT micro-pill (top-right would read as a
+       promotional notification badge): the count in --fg-1 carries the signal,
+       a tiny uppercase unit avoids "lines"/"lineups" confusion. Absolutely
+       positioned (out of the flex flow, cannot shift the centered abbrs),
+       clears the 4-5px top stripe, pointer-events:none so the square stays one
+       click target. Shown only when count > 0. */
+    .dv-slate-lines {
+        position: absolute; top: 7px; left: 7px; z-index: 1;
+        pointer-events: none;
+        display: inline-flex; align-items: baseline; gap: 0.2rem;
+        padding: 0.1rem 0.38rem; border-radius: 999px;
+        background: var(--hairline); border: 1px solid var(--panel-line);
+        font-family: 'Space Grotesk', sans-serif;
+        line-height: 1; white-space: nowrap; font-variant-numeric: tabular-nums;
+        transition: color .14s ease, border-color .14s ease, background .14s ease;
+    }
+    .dv-slate-lines b { font-weight: 700; font-size: 0.74rem; color: var(--fg-1); }
+    .dv-slate-lines .dv-lines-u {
+        font-size: 0.5rem; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--fg-5);
+    }
+    /* Hover: adopt the card's teal so the pill joins the accent language of the
+       hover border and focus ring. Plain fallback first, color-mix enhancement. */
+    a.dv-slate-card:hover .dv-slate-lines { border-color: var(--accent-teal); }
+    a.dv-slate-card:hover .dv-slate-lines b,
+    a.dv-slate-card:hover .dv-slate-lines .dv-lines-u { color: var(--accent-teal); }
+    @supports (color: color-mix(in srgb, red, white)) {
+        a.dv-slate-card:hover .dv-slate-lines {
+            border-color: color-mix(in srgb, var(--accent-teal) 45%, var(--panel-line));
+            background: color-mix(in srgb, var(--accent-teal) 12%, var(--panel));
+        }
+        a.dv-slate-card:hover .dv-slate-lines .dv-lines-u {
+            color: color-mix(in srgb, var(--accent-teal) 65%, var(--fg-4));
+        }
+    }
+    @media (prefers-reduced-motion: reduce) { .dv-slate-lines { transition: none; } }
 
     /* Date control bar (keyed container): chevrons + date + Yesterday/Today */
     .st-key-dv_datebar [data-testid="stHorizontalBlock"] { align-items: flex-end; }

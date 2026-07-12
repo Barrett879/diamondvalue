@@ -128,6 +128,49 @@ def test_parse_prizepicks_board_text():
     assert len(props.parse_any(board)) == len(df) >= 3
 
 
+def _bat(game, name, **over):
+    row = {"gamePk": game, "fullName": name, "role": "bat", "TB": 2.0, "H": 1.0,
+           "HR": 0.3, "R": 0.6, "RBI": 0.5, "BB": 0.3, "SO": 0.8, "SB": 0.1,
+           "b1": 0.6, "b2": 0.2, "b3": 0.0, "PA": 4.0, "slot": 1}
+    row.update(over)
+    return row
+
+
+def test_line_counts_by_game_sums_both_teams(monkeypatch):
+    import props_ui
+    from mlblib import props as _props
+    # Game 1: two Dodgers lines (Betts TB + Hits) and one D-backs line (Marte TB)
+    # -> 3. Game 2: one Yankees line -> 1. A line for a player not on the slate
+    # is not counted.
+    preds = pd.DataFrame([
+        _bat(1, "Mookie Betts"), _bat(1, "Freddie Freeman"), _bat(1, "Ketel Marte"),
+        _bat(2, "Aaron Judge"),
+    ])
+    lines = pd.DataFrame([
+        {"name": "Mookie Betts", "stat_type": "Total Bases", "line": 1.5},
+        {"name": "Mookie Betts", "stat_type": "Hits", "line": 0.5},
+        {"name": "Ketel Marte", "stat_type": "Total Bases", "line": 1.5},
+        {"name": "Aaron Judge", "stat_type": "Home Runs", "line": 0.5},
+        {"name": "Nobody Here", "stat_type": "Hits", "line": 0.5},
+    ])
+    monkeypatch.setattr(_props, "load_lines", lambda d: lines)
+    assert props_ui.line_counts_by_game(preds, "2026-07-12") == {1: 3, 2: 1}
+
+
+def test_line_counts_by_game_empty_when_no_lines(monkeypatch):
+    import props_ui
+    from mlblib import props as _props
+    preds = pd.DataFrame([_bat(1, "Mookie Betts")])
+    monkeypatch.setattr(_props, "load_lines", lambda d: None)
+    assert props_ui.line_counts_by_game(preds, "2026-07-12") == {}
+    # No gamePk column -> no crash, empty result.
+    monkeypatch.setattr(_props, "load_lines",
+                        lambda d: pd.DataFrame([{"name": "Mookie Betts",
+                                                 "stat_type": "Hits", "line": 0.5}]))
+    assert props_ui.line_counts_by_game(preds.drop(columns="gamePk"),
+                                        "2026-07-12") == {}
+
+
 def test_parse_json_and_list():
     payload = {
         "data": [{"type": "projection", "attributes": {

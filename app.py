@@ -176,6 +176,16 @@ st.markdown(
     '<span class="lg-none"><i></i>Not posted</span>'
     '</div></div>', unsafe_allow_html=True)
 
+# Load the slate's predictions once; persist any freshly-pasted lines BEFORE we
+# count them, so each card's line badge reflects the latest paste on this run.
+# line_counts maps gamePk -> posted PrizePicks lines summed across both teams.
+_preds_full = store.load_predictions(date_iso)
+_has_preds = _preds_full is not None and not _preds_full.empty
+line_counts: dict = {}
+if _has_preds:
+    props_ui.resolve_and_persist(date_iso)
+    line_counts = props_ui.line_counts_by_game(_preds_full, date_iso)
+
 _STATUS_CLS = {"lineups posted": "s-posted", "1 lineup posted": "s-partial",
                "lineups not posted": "s-none"}
 cards = []
@@ -184,9 +194,18 @@ for gpk, away, home, et, status in rows:
     scls = _STATUS_CLS.get(status, "s-none")
     ap, _ = team_color(away)
     hp, _ = team_color(home)
+    n = line_counts.get(int(gpk), 0)
+    unit = "line" if n == 1 else "lines"
+    lines_html = (
+        f'<span class="dv-slate-lines" '
+        f'title="{n} PrizePicks prop {unit} mapped to our projections" '
+        f'aria-label="{n} projected prop {unit} to review">'
+        f'<b>{n}</b><span class="dv-lines-u">{unit}</span></span>'
+    ) if n > 0 else ""
     cards.append(
         f'<a class="dv-slate-card" href="{href}" target="_self" '
         f'style="--away:{ap};--home:{hp}">'
+        f'{lines_html}'
         f'<span class="dv-slate-away">{away}</span>'
         f'<span class="dv-slate-at">at</span>'
         f'<span class="dv-slate-home">{home}</span>'
@@ -201,12 +220,11 @@ st.caption("Pitcher strikeouts are the most predictable per-game stat. Batter "
            "single-game numbers are low-signal by nature; treat every value as "
            "a distribution mean.")
 
-# ── PrizePicks: load lines for the whole slate; biggest edges surface here and
-# on every game page. Collapsed by default so it never clutters the slate. ────
-_preds_full = store.load_predictions(date_iso)
-if _preds_full is not None and not _preds_full.empty:
+# ── PrizePicks: the slate-wide biggest edges surface here and on every game
+# page. Lines were already persisted above (before the card counts), so this
+# just renders. Collapsed input so it never clutters the slate. ───────────────
+if _has_preds:
     st.markdown('<div class="dv-bar-rule"></div>', unsafe_allow_html=True)
-    props_ui.resolve_and_persist(date_iso)
     props_ui.render_board(_preds_full, date_iso, scope_label="the slate")
     with st.expander("Add / update PrizePicks lines", expanded=False):
         props_ui.render_input(date_iso)
