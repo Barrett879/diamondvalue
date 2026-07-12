@@ -128,8 +128,14 @@ if has_numbers and meta:
     _hero(away, home, date, et)
     # Persist any freshly-entered lines FIRST, so the expandable roster rows
     # reflect the latest paste; then group them by player for the rows.
-    props_ui.resolve_and_persist(date)
-    pbn = props_ui.props_by_name(gp, date)
+    # Guarded because Streamlit Cloud can hot-reload this page before the
+    # imported props_ui module reimports on a deploy -- degrade to plain rows
+    # rather than crash during that brief window.
+    try:
+        props_ui.resolve_and_persist(date)
+        pbn = props_ui.props_by_name(gp, date)
+    except Exception:  # noqa: BLE001
+        pbn = {}
     if pbn:
         st.caption("Players with a teal count have posted PrizePicks lines; "
                    "click the row to see them.")
