@@ -406,6 +406,28 @@ def get_gumbo_hp_umpire(game_pk: int) -> str | None:
     return None
 
 
+def get_gumbo_lineup_catchers(game_pk: int) -> dict:
+    """Per side, today's CATCHER from the GUMBO live feed's pregame boxscore:
+    the player whose fielding position is C and who carries a battingOrder
+    (i.e. is in the posted lineup). Unlike the schedule lineups hydrate, this
+    is the per-GAME fielding position, so a catcher DHing does not fool it.
+    Returns {"home": personId|None, "away": personId|None}.
+    """
+    out = {"home": None, "away": None}
+    data = _http_json(f"{STATS_BASE_11}/game/{game_pk}/feed/live", None,
+                      have_stale=True)
+    if not data:
+        return out
+    teams = ((data.get("liveData") or {}).get("boxscore") or {}).get("teams") or {}
+    for side in ("home", "away"):
+        for pl in (teams.get(side, {}).get("players") or {}).values():
+            pos = ((pl.get("position") or {}).get("abbreviation") or "")
+            if pos == "C" and pl.get("battingOrder"):
+                out[side] = (pl.get("person") or {}).get("id")
+                break
+    return out
+
+
 def get_savant_csv(leaderboard: str, year: int) -> str | None:
     """Raw CSV text from a Savant leaderboard that supports csv=true
     (catcher-framing, catcher-throwing).

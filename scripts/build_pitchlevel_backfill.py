@@ -126,40 +126,77 @@ def build_season(season: int) -> None:
                    season, len(tto), len(velo))
 
 
+def _merge_pergame(new: pd.DataFrame, path, key: list[str]) -> int:
+    """Merge freshly reduced per-game rows into a committed parquet,
+    replacing overlapping rows (keep='last' so a partial in-progress-game row
+    fetched at the early run is replaced by the complete one next run)."""
+    old = cache.read_parquet_or_none(path)
+    combined = (pd.concat([old, new], ignore_index=True)
+                if old is not None else new)
+    combined = combined.drop_duplicates(subset=key, keep="last")
+    cache.atomic_to_parquet(combined, path)
+    return len(combined)
+
+
 def update_current_velo(season: int, days: int = 8) -> None:
-    """Rolling in-season update of fbvelo_{season}: fetch the last `days` days
-    (2-3 chunks), reduce, and merge into the committed parquet. Keeps the
-    velocity-trend features live for current-season inference without the
-    full-season chunk cache (CI-friendly: a handful of fetches per run).
+    """Rolling in-season update of the three per-game pitch-level tables
+    (fbvelo, relspin2, batproc2) from ONE KEEP2 fetch of the recent window.
+
+    Self-healing window: starts at the earliest of (today - days) and each
+    table's own coverage edge, so an Actions outage or a bootstrap handoff
+    gap is backfilled instead of becoming a permanent hole (capped at 30
+    days). Stale-beats-empty: on a total fetch failure NO parquet is touched.
     """
     import datetime as _dt
 
+    from scripts.build_pitchlevel_v2_tables import (_derive, reduce_batproc,
+                                                    reduce_relspin)
+
     end = _dt.date.today()
     start = end - _dt.timedelta(days=days)
+    for stem in (f"fbvelo_{season}_v1", f"relspin2_{season}_v1",
+                 f"batproc2_{season}_v1"):
+        t = cache.read_parquet_or_none(cache.dc_path(f"{stem}.parquet"))
+        if t is not None and len(t) and "game_date" in t.columns:
+            edge = (pd.to_datetime(t["game_date"].astype(str).str[:10]).max()
+                    .date() + _dt.timedelta(days=1))
+            start = min(start, edge)
+    start = max(start, end - _dt.timedelta(days=30), _dt.date(season, 3, 15))
+
     parts = []
     cur = start
     while cur <= end:
         d1 = min(cur + _dt.timedelta(days=CHUNK_DAYS - 1), end)
-        df = _fetch_chunk(cur, d1)
+        df = _fetch_chunk(cur, d1, keep=KEEP2)
         time.sleep(2.0)
         if df is not None and not df.empty:
-            parts.append(_reduce(df))
+            parts.append(df)
         cur += _dt.timedelta(days=CHUNK_DAYS)
     if not parts:
-        logger.warning("velo update %s: nothing fetched", season)
+        logger.warning("pitch-level update %s: nothing fetched (tables "
+                       "left untouched)", season)
         return
     allp = pd.concat(parts, ignore_index=True)
-    fb = allp[allp["is_fb"] & allp["release_speed"].notna()]
-    new = (fb.groupby(["pitcher", "game_pk", "game_date"])
-           .agg(ff_velo=("release_speed", "mean"), n_ff=("release_speed", "size"))
-           .reset_index().rename(columns={"pitcher": "player_id"}))
-    new["season"] = season
-    path = cache.dc_path(f"fbvelo_{season}_v1.parquet")
-    old = cache.read_parquet_or_none(path)
-    combined = (pd.concat([old, new], ignore_index=True) if old is not None else new)
-    combined = combined.drop_duplicates(subset=["player_id", "game_pk"], keep="last")
-    cache.atomic_to_parquet(combined, path)
-    logger.warning("velo update %s: +%d starts (total %d)", season, len(new), len(combined))
+    allp["game_date"] = allp["game_date"].astype(str).str[:10]
+
+    red = _reduce(allp)
+    fb = red[red["is_fb"] & red["release_speed"].notna()]
+    velo = (fb.groupby(["pitcher", "game_pk", "game_date"])
+            .agg(ff_velo=("release_speed", "mean"), n_ff=("release_speed", "size"))
+            .reset_index().rename(columns={"pitcher": "player_id"}))
+    velo["season"] = season
+    n1 = _merge_pergame(velo, cache.dc_path(f"fbvelo_{season}_v1.parquet"),
+                        ["player_id", "game_pk"])
+
+    d2 = _derive(allp)
+    n2 = _merge_pergame(reduce_relspin(d2, season),
+                        cache.dc_path(f"relspin2_{season}_v1.parquet"),
+                        ["player_id", "game_pk"])
+    n3 = _merge_pergame(reduce_batproc(d2, season),
+                        cache.dc_path(f"batproc2_{season}_v1.parquet"),
+                        ["player_id", "game_pk"])
+    logger.warning("pitch-level update %s from %s: fbvelo %d, relspin2 %d, "
+                   "batproc2 %d rows", season, start, n1, n2, n3)
 
 
 def fetch_v2_parts(season: int) -> None:
@@ -168,16 +205,20 @@ def fetch_v2_parts(season: int) -> None:
     (framing, batter-vs-velo, platoon, release drift) are built from these in
     a later round. Resumable; skips parts already on disk.
     """
-    today = dt.date.today()
+    # Only cache windows that are safely complete (Savant rows for very recent
+    # days are partial/intraday): a clipped window cached under the full-window
+    # filename would be a permanent silent hole. The rolling daily updater owns
+    # the recent edge.
+    safe_end = dt.date.today() - dt.timedelta(days=2)
     n = 0
     for d0, d1 in _season_days(season):
-        if d0 > today:
+        if d1 > safe_end:
             break
         part_path = (cache.CACHE_DIR / "raw_statcast" /
                      f"red2_{d0.isoformat()}_{d1.isoformat()}.parquet")
         if part_path.exists():
             continue
-        df = _fetch_chunk(d0, min(d1, today), keep=KEEP2)
+        df = _fetch_chunk(d0, d1, keep=KEEP2)
         time.sleep(2.0)
         if df is None or df.empty:
             continue

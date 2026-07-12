@@ -134,6 +134,44 @@ FEATURE_BLOCKS = {
                   "targets": set()},
     "ump_pit": {"cols": ["ump_k_delta", "ump_bb_delta"],
                 "targets": {"p_BB", "p_K"}},
+    # Round-6 candidate blocks (pitch-level v2 re-pull). Eligible targets were
+    # PRE-REGISTERED before the 2024 ablations to bound multiple testing (26
+    # block-target tests this round; expect ~1 false 2024 grant, which the
+    # 2025 confirmation exists to kill): framing_bat2 -> {SO, BB};
+    # platoon2_bat -> {SO, BB, HR, b1, b2}; batvelo_bat -> {SO, b1, b2, HR};
+    # batproc_bat -> {SO, BB, b1, b2, HR}; framing_pit2 -> {p_K, p_BB};
+    # relspin_pit -> {p_outs, p_BF, p_pitches, p_K, p_H};
+    # mix_pit -> {p_pitches, p_K, p_H}. b3 is ineligible everywhere (triples
+    # are speed+park noise at a 0.1% floor).
+    # 2025 confirmation verdicts (per-block, full-history harness): the
+    # opposing/own catcher framing NEVER replicated (p_BB granted 2024 -0.08%
+    # dev, failed 2025 +0.17% mae) -- the "supporting catcher" is a real but
+    # sub-noise effect at per-game granularity; catcher identity is still
+    # displayed, just not a model input. mix diversity (p_K) was a 2024 mirage.
+    "framing_bat2": {"cols": ["oppc_framing"], "targets": set()},
+    "framing_pit2": {"cols": ["ownc_framing"], "targets": set()},
+    "mix_pit": {"cols": ["mix_entropy", "mix_fbshare"], "targets": set()},
+    # True per-PA platoon: vs-hand BB and singles replicated both years
+    # (HR/SO were 2024-only). Round-2's whole-game-vs-starter-hand proxy stays.
+    "platoon2_bat": {"cols": ["pp2_k", "pp2_bb", "pp2_hr", "pp2_h"],
+                     "targets": {"BB", "b1"}},
+    # Velocity handling (hard-FB whiff/xwOBA + hard-minus-soft gap + opposing
+    # starter velo): HR, SO, doubles all replicated -- the strongest batter
+    # block of the round.
+    "batvelo_bat": {"cols": ["bat_whiff95", "bat_xw95", "bat_whiff_gap",
+                             "opp_sp_ffvelo"], "targets": {"HR", "b2"}},
+    # Batter process form: SO passed each block's per-block 2025 check, but
+    # batvelo AND batproc both target SO and are REDUNDANT -- the joint
+    # retrained SO model was +0.05% MAE / +0.00% dev (a wash that slightly
+    # hurts), so SO is struck from both. batproc ships nowhere.
+    "batproc_bat": {"cols": ["proc_whiff15", "proc_chase15", "proc_xw15"],
+                    "targets": set()},
+    # Release-point / spin drift (mechanics canary): the LARGEST confirmed
+    # gains in project history, and they GREW on the held-out year --
+    # p_pitches dev -4.16%/mae -1.17%, p_BF -4.79%/-1.51%, p_outs
+    # -2.27%/-0.79%, p_K -0.09%. Same fatigue/injury family as velo_trend.
+    "relspin_pit": {"cols": ["spin_drop", "rel_drift"],
+                    "targets": {"p_outs", "p_BF", "p_pitches", "p_K"}},
 }
 
 

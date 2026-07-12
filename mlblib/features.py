@@ -156,6 +156,23 @@ class Context:
         else:
             self._tto_wide = pd.DataFrame()
 
+        # Round-6 pitch-level v2 season tables (framing, true per-PA platoon,
+        # batter-vs-velocity, pitch mix). Sums + counts on disk; all shrinkage
+        # happens at lookup. relspin2/batproc2 are per-game AS-OF tables and
+        # are handled by module-level builders, not Context.
+        def _load_family(stem: str) -> pd.DataFrame:
+            fs = []
+            for y in years:
+                t = cache.read_parquet_or_none(cache.dc_path(f"{stem}_{y}_v1.parquet"))
+                if t is not None:
+                    fs.append(t)
+            return pd.concat(fs, ignore_index=True) if fs else pd.DataFrame()
+
+        self._framing2 = _load_family("framing2")
+        self._platoon2 = _load_family("platoon2")
+        self._batvelo2 = _load_family("batvelo2")
+        self._mix2 = _load_family("mix2")
+
         # Per-game environment (parsed from cached boxscores) + venue geometry.
         gw = cache.read_parquet_or_none(cache.dc_path("game_weather_v1.parquet"))
         self.game_weather = gw if gw is not None else pd.DataFrame()
@@ -200,6 +217,160 @@ class Context:
             "player_id": pd.to_numeric(pd.Series(person_ids), errors="coerce"),
         })
         ref = self._tto_wide[["season", "player_id", col]].rename(columns={col: "_v"})
+        merged = key.merge(ref, on=["season", "player_id"], how="left").sort_values("_i")
+        return pd.to_numeric(merged["_v"], errors="coerce").values
+
+    def _cum_prior(self, table: pd.DataFrame, sum_cols: list[str],
+                   seasons, ids) -> pd.DataFrame:
+        """Cumulative strictly-prior-season sums per player_id, aligned to the
+        query rows (merge_asof backward on season, no exact match -- the
+        _platoon_split_table pattern). NaN when the player has no prior rows.
+        """
+        n = len(seasons)
+        out = pd.DataFrame({c: np.full(n, np.nan) for c in sum_cols})
+        if table.empty:
+            return out
+        t = table.sort_values(["player_id", "season"]).copy()
+        for c in sum_cols:
+            t[c] = t.groupby("player_id")[c].cumsum()
+        t["_season"] = pd.to_numeric(t["season"], errors="coerce").astype("float64")
+        t["_pid"] = pd.to_numeric(t["player_id"], errors="coerce").astype("float64")
+        key = pd.DataFrame({
+            "_i": np.arange(n),
+            "_season": pd.to_numeric(pd.Series(seasons), errors="coerce").astype("float64"),
+            "_pid": pd.to_numeric(pd.Series(ids), errors="coerce").astype("float64"),
+        })
+        ok = key.dropna(subset=["_season", "_pid"]).sort_values("_season")
+        right = t[["_pid", "_season"] + sum_cols].dropna(subset=["_pid"]).sort_values("_season")
+        merged = pd.merge_asof(ok, right, on="_season", by="_pid",
+                               direction="backward", allow_exact_matches=False)
+        for c in sum_cols:
+            out.loc[merged["_i"].values, c] = merged[c].values
+        return out
+
+    def framing2_lookup(self, seasons, catcher_ids) -> np.ndarray:
+        """Catcher receiving skill: cumulative prior-season called strikes
+        above location-binned expectation per shadow pitch, shrunk n/(n+1000).
+        """
+        cum = self._cum_prior(self._framing2, ["shadow_n", "cs_resid"],
+                              seasons, catcher_ids)
+        nsh = cum["shadow_n"].values
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(nsh > 0,
+                            (cum["cs_resid"].values / nsh) * (nsh / (nsh + 1000.0)),
+                            np.nan)
+
+    PLATOON2_K = 1000.0  # PA ballast on the SPLIT delta (splits stabilize slowly)
+
+    def platoon2_lookup(self, seasons, batter_ids, hands) -> dict:
+        """True per-PA platoon rates vs the starter's hand, cumulative prior
+        seasons. The batter's own overall rate is the anchor; his split delta
+        is shrunk toward the league handedness offset:
+            pp2_x = overall + lg_off(hand) + (vs_hand - overall - lg_off) * n/(n+K)
+        Rows with unknown hand or no prior PA return NaN.
+        """
+        comps = {"pp2_k": "so", "pp2_bb": "bb", "pp2_hr": "hr", "pp2_h": "h"}
+        n = len(seasons)
+        out = {k: np.full(n, np.nan) for k in comps}
+        t = self._platoon2
+        if t.empty:
+            return out
+        cols = ["pa"] + list(comps.values())
+        overall = (t.groupby(["player_id", "season"])[cols].sum().reset_index())
+        cum_o = self._cum_prior(overall, cols, seasons, batter_ids)
+        by_hand = {h: self._cum_prior(
+            t[t["p_throws"] == h].groupby(["player_id", "season"])[cols]
+            .sum().reset_index(), cols, seasons, batter_ids) for h in ("L", "R")}
+        # League cumulative prior rates per season, by hand and overall.
+        lg_season = (t.groupby(["season", "p_throws"])[cols].sum().reset_index())
+        hands_arr = pd.Series(hands).astype(str).values
+        uniq = sorted(pd.Series(seasons).dropna().unique())
+        lg = {}
+        for sn in uniq:
+            prior = lg_season[lg_season["season"] < sn]
+            if prior.empty or prior["pa"].sum() == 0:
+                continue
+            tot = prior[cols].sum()
+            rates_all = {c: tot[c] / tot["pa"] for c in comps.values()}
+            lg[sn] = {}
+            for h in ("L", "R"):
+                ph = prior[prior["p_throws"] == h][cols].sum()
+                if ph["pa"] > 0:
+                    lg[sn][h] = {c: ph[c] / ph["pa"] - rates_all[c]
+                                 for c in comps.values()}
+        pa_o = cum_o["pa"].values
+        for feat, c in comps.items():
+            with np.errstate(invalid="ignore", divide="ignore"):
+                rate_o = np.where(pa_o > 0, cum_o[c].values / pa_o, np.nan)
+            vals = np.full(n, np.nan)
+            for h in ("L", "R"):
+                sel = hands_arr == h
+                if not sel.any():
+                    continue
+                pa_h = by_hand[h]["pa"].values
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    rate_h = np.where(pa_h > 0, by_hand[h][c].values / pa_h, np.nan)
+                off = np.array([lg.get(sn, {}).get(h, {}).get(c, np.nan)
+                                for sn in seasons], dtype=float)
+                base = rate_o + off
+                w = np.where(pa_h > 0, pa_h / (pa_h + self.PLATOON2_K), 0.0)
+                delta = np.where(pa_h > 0, rate_h - rate_o - off, 0.0)
+                vals = np.where(sel, base + w * delta, vals)
+            out[feat] = vals
+        return out
+
+    def batvelo2_lookup(self, seasons, batter_ids):
+        """Batter skill vs hard fastballs, cumulative prior seasons: whiff rate
+        per swing (k=100 swings toward league), xwOBA on tracked contact
+        (k=60 tracked BBE toward league), and the hard-minus-SOFT whiff gap
+        (each rate shrunk toward its own league mean, so the difference
+        naturally shrinks toward the league gap for small samples -- isolates
+        velocity-specific whiff from a batter's overall swing-and-miss)."""
+        cols = ["swings", "whiffs", "xwcon_sum", "xwcon_n",
+                "soft_swings", "soft_whiffs"]
+        t = self._batvelo2
+        n = len(seasons)
+        nan = np.full(n, np.nan)
+        if t.empty or "soft_swings" not in t.columns:
+            return nan, nan.copy(), nan.copy()
+        cum = self._cum_prior(t, cols, seasons, batter_ids)
+        lg_season = t.groupby("season")[cols].sum().reset_index()
+        lg_w, lg_x, lg_sw = {}, {}, {}
+        for sn in sorted(pd.Series(seasons).dropna().unique()):
+            prior = lg_season[lg_season["season"] < sn][cols].sum()
+            if prior["swings"] > 0:
+                lg_w[sn] = prior["whiffs"] / prior["swings"]
+            if prior["xwcon_n"] > 0:
+                lg_x[sn] = prior["xwcon_sum"] / prior["xwcon_n"]
+            if prior["soft_swings"] > 0:
+                lg_sw[sn] = prior["soft_whiffs"] / prior["soft_swings"]
+        lw = np.array([lg_w.get(sn, np.nan) for sn in seasons], dtype=float)
+        lx = np.array([lg_x.get(sn, np.nan) for sn in seasons], dtype=float)
+        lsw = np.array([lg_sw.get(sn, np.nan) for sn in seasons], dtype=float)
+        sw, wh = cum["swings"].values, cum["whiffs"].values
+        xs, xn = cum["xwcon_sum"].values, cum["xwcon_n"].values
+        ssw, swh = cum["soft_swings"].values, cum["soft_whiffs"].values
+        whiff = np.where(np.isnan(sw), np.nan, (wh + 100.0 * lw) / (sw + 100.0))
+        xw = np.where(np.isnan(xn), np.nan, (xs + 60.0 * lx) / (xn + 60.0))
+        soft_whiff = np.where(np.isnan(sw), np.nan,
+                              (swh + 100.0 * lsw) / (ssw + 100.0))
+        return whiff, xw, whiff - soft_whiff
+
+    def mix2_lookup(self, seasons, person_ids, col: str) -> np.ndarray:
+        """Y-1 pitch-mix lookup (entropy is a stable trait; single season)."""
+        t = self._mix2
+        n = len(seasons)
+        if t.empty or col not in t.columns:
+            return np.full(n, np.nan)
+        years = sorted(t["season"].unique())
+        pyr = {s: max((y for y in years if y < s), default=None)
+               for s in pd.unique(seasons)}
+        key = pd.DataFrame({
+            "_i": np.arange(n),
+            "season": [pyr.get(s) for s in seasons],
+            "player_id": pd.to_numeric(pd.Series(person_ids), errors="coerce"),
+        })
+        ref = t[["season", "player_id", col]].rename(columns={col: "_v"})
         merged = key.merge(ref, on=["season", "player_id"], how="left").sort_values("_i")
         return pd.to_numeric(merged["_v"], errors="coerce").values
 
@@ -499,6 +670,15 @@ def compute_batter_features(history: pd.DataFrame, targets: pd.DataFrame | None 
     # League-environment drift (round 5).
     combined = _join_league_env(combined, _league_env_table(history))
 
+    # Round 6: batter process form (rolling-15 vs season baseline) and the
+    # opposing starter's recent fastball velocity (pairs with bat_whiff95).
+    r6_years = sorted(pd.Series(combined["season"]).dropna().unique().tolist())
+    combined = _join_pergame_asof(combined, _batproc_asof_table(r6_years),
+                                  ["proc_whiff15", "proc_chase15", "proc_xw15"])
+    combined = _join_velo_asof(combined, _velo_asof_table(r6_years),
+                               id_col="oppStarterId",
+                               cols={"velo_r3": "opp_sp_ffvelo"})
+
     out = combined[combined["_is_target"]].copy()
     feat = _assemble_batter_feature_cols(out, league, ctx, universe, lg_plat)
     return feat
@@ -588,6 +768,10 @@ def _assemble_batter_feature_cols(df, league, ctx, universe,
     for c in ("lg_bb30", "lg_k30", "lg_r30", "lg_hr30"):
         f[c] = pd.to_numeric(_series(df, c), errors="coerce").values
 
+    # Round-6 blocks: process form (as-of joins) + opposing starter velo.
+    for c in ("proc_whiff15", "proc_chase15", "proc_xw15", "opp_sp_ffvelo"):
+        f[c] = pd.to_numeric(_series(df, c), errors="coerce").values
+
     # Park factors (Y-1, by batter hand) and opposing catcher metrics, vectorized.
     if ctx is not None:
         seasons = df["season"].values
@@ -599,13 +783,18 @@ def _assemble_batter_feature_cols(df, league, ctx, universe,
                           ("index_1b", "pf_1b"), ("index_2b", "pf_2b"),
                           ("index_3b", "pf_3b")]:
             f[name] = pk[col].values
-        # NOTE: opposing catcher framing/throwing (Barrett's "supporting
-        # catcher") is DEFERRED to v2. Savant's catcher leaderboards are not
-        # cleanly year-filterable through the public URL (every year returns the
-        # same default snapshot), so using them would inject mild leakage into a
-        # feature the spec already flags as small. The starting catcher's
-        # identity is still captured (attach_catchers) for display and future
-        # use. See docs/decisions.md.
+        # Round 6: the "supporting catcher" arrives at last -- OPPOSING
+        # catcher receiving skill from our own pitch-level framing2 tables
+        # (Savant's leaderboards, which are not year-filterable, stay unused).
+        # Plus true per-PA platoon splits and hard-fastball contact skill.
+        f["oppc_framing"] = ctx.framing2_lookup(
+            seasons, _series(df, "oppCatcherId").values)
+        pp2 = ctx.platoon2_lookup(seasons, df["personId"].values,
+                                  _series(df, "oppStarterHand").values)
+        for c in ("pp2_k", "pp2_bb", "pp2_hr", "pp2_h"):
+            f[c] = pp2[c]
+        f["bat_whiff95"], f["bat_xw95"], f["bat_whiff_gap"] = \
+            ctx.batvelo2_lookup(seasons, df["personId"].values)
 
         # Statcast quality-of-contact priors (Y-1): contact quality is more
         # stable than outcomes, so last season's expected stats, exit velocity,
@@ -770,21 +959,153 @@ def _velo_asof_table(years: list[int]) -> pd.DataFrame:
     return v[["player_id", "_d", "velo_r3", "velo_trend"]].dropna(subset=["_d"])
 
 
-def _join_velo_asof(combined: pd.DataFrame, velo: pd.DataFrame) -> pd.DataFrame:
+def _join_velo_asof(combined: pd.DataFrame, velo: pd.DataFrame,
+                    id_col: str = "personId",
+                    cols: dict | None = None) -> pd.DataFrame:
+    """As-of join of a per-(player, date) table onto rows. `cols` maps source
+    column -> output column ({"velo_r3": "velo_r3", ...} by default); id_col
+    lets the batter path join the OPPOSING starter's table via oppStarterId.
+    """
+    cols = cols or {"velo_r3": "velo_r3", "velo_trend": "velo_trend"}
     if velo.empty:
+        for out_c in cols.values():
+            combined[out_c] = np.nan
         return combined
     left = combined.copy()
     left["_d"] = pd.to_datetime(left["officialDate"], errors="coerce").dt.normalize()
-    left["_by"] = pd.to_numeric(left["personId"], errors="coerce").astype("float64")
+    left["_by"] = pd.to_numeric(left[id_col], errors="coerce").astype("float64")
     left = left.reset_index().rename(columns={"index": "_row"})
     ls = left.dropna(subset=["_by", "_d"]).sort_values("_d")
     right = velo.copy()
     right["_by"] = pd.to_numeric(right["player_id"], errors="coerce").astype("float64")
     right = right.dropna(subset=["_by", "_d"]).sort_values("_d")
-    merged = pd.merge_asof(ls, right[["_by", "_d", "velo_r3", "velo_trend"]],
+    merged = pd.merge_asof(ls, right[["_by", "_d"] + list(cols)],
                            on="_d", by="_by", direction="backward",
                            allow_exact_matches=False)
-    for c in ("velo_r3", "velo_trend"):
+    for src_c, out_c in cols.items():
+        combined[out_c] = np.nan
+        combined.loc[merged["_row"].values, out_c] = merged[src_c].values
+    return combined
+
+
+def _relspin_asof_table(years: list[int]) -> pd.DataFrame:
+    """Release-point / spin drift per start, from the relspin2 per-game tables.
+
+    UNSHIFTED rolling windows (the row's own game is included): the strictly-
+    prior exclusion is done ONCE, by the allow_exact_matches=False date join.
+    Shifting here too would double-lag and hide the freshest start -- exactly
+    where an injury/mechanics canary lives. Windows are season-bound (a
+    within-season drift vs a season baseline is meaningless across winters).
+
+    spin_drop is league-centered: the league's own last-21-day minus
+    season-to-date spin trajectory (as-of the same date) is subtracted, so the
+    June-2021 sticky-stuff enforcement reads as league regime, not as every
+    pitcher simultaneously breaking down.
+    """
+    frames = []
+    for y in years:
+        f = cache.read_parquet_or_none(cache.dc_path(f"relspin2_{y}_v1.parquet"))
+        if f is not None:
+            frames.append(f)
+    if not frames:
+        return pd.DataFrame()
+    v = pd.concat(frames, ignore_index=True)
+    v["_d"] = pd.to_datetime(v["game_date"], errors="coerce").dt.normalize()
+    v = v.dropna(subset=["_d"]).sort_values(["player_id", "season", "_d", "game_pk"])
+    v = v.reset_index(drop=True)
+    g = v.groupby(["player_id", "season"], sort=False)
+    r3 = {c: g[c].transform(lambda x: x.rolling(3, min_periods=2).sum())
+          for c in ("relx_sum", "relz_sum", "spin_sum", "spin_n", "n_fb")}
+    std = {c: g[c].transform(lambda x: x.expanding(min_periods=2).sum())
+           for c in ("relx_sum", "relz_sum", "spin_sum", "spin_n", "n_fb")}
+    with np.errstate(invalid="ignore", divide="ignore"):
+        ok_fb = (r3["n_fb"] >= 50) & (std["n_fb"] >= 50)
+        rel_drift = np.sqrt(
+            (r3["relx_sum"] / r3["n_fb"] - std["relx_sum"] / std["n_fb"]) ** 2
+            + (r3["relz_sum"] / r3["n_fb"] - std["relz_sum"] / std["n_fb"]) ** 2)
+        v["rel_drift"] = np.where(ok_fb, rel_drift, np.nan)
+        ok_sp = (r3["spin_n"] >= 50) & (std["spin_n"] >= 50)
+        spin_drop = (r3["spin_sum"] / r3["spin_n"]
+                     - std["spin_sum"] / std["spin_n"])
+    # League trajectory per date (weighted by spin_n), season-bound.
+    day = (v.groupby(["season", "_d"])
+           .agg(sp=("spin_sum", "sum"), n=("spin_n", "sum")).reset_index()
+           .sort_values(["season", "_d"]))
+    dg = day.groupby("season", sort=False)
+    day["l_r21_sp"] = dg.rolling("21D", on="_d")["sp"].sum().values
+    day["l_r21_n"] = dg.rolling("21D", on="_d")["n"].sum().values
+    day["l_std_sp"] = dg["sp"].transform("cumsum")
+    day["l_std_n"] = dg["n"].transform("cumsum")
+    with np.errstate(invalid="ignore", divide="ignore"):
+        day["l_adj"] = (day["l_r21_sp"] / day["l_r21_n"]
+                        - day["l_std_sp"] / day["l_std_n"])
+    v = v.merge(day[["season", "_d", "l_adj"]], on=["season", "_d"], how="left")
+    v["spin_drop"] = np.where(ok_sp, spin_drop - v["l_adj"].fillna(0.0), np.nan)
+    return v[["player_id", "season", "_d", "spin_drop", "rel_drift"]]
+
+
+def _batproc_asof_table(years: list[int]) -> pd.DataFrame:
+    """Batter process form from the batproc2 per-game tables: rolling
+    last-15-GAME ratios minus the season-to-date baseline, computed from
+    summed counts (never averaged per-game rates). UNSHIFTED windows +
+    no-exact-date join, season-bound (same rationale as _relspin_asof_table).
+    """
+    frames = []
+    for y in years:
+        f = cache.read_parquet_or_none(cache.dc_path(f"batproc2_{y}_v1.parquet"))
+        if f is not None:
+            frames.append(f)
+    if not frames:
+        return pd.DataFrame()
+    v = pd.concat(frames, ignore_index=True)
+    v["_d"] = pd.to_datetime(v["game_date"], errors="coerce").dt.normalize()
+    v = v.dropna(subset=["_d"]).sort_values(["player_id", "season", "_d", "game_pk"])
+    v = v.reset_index(drop=True)
+    g = v.groupby(["player_id", "season"], sort=False)
+    cols = ("swings", "whiffs", "oz_n", "oz_swings", "xwcon_sum", "xwcon_n")
+    r15 = {c: g[c].transform(lambda x: x.rolling(15, min_periods=5).sum())
+           for c in cols}
+    std = {c: g[c].transform(lambda x: x.expanding(min_periods=5).sum())
+           for c in cols}
+
+    def _delta(num, den, floor):
+        with np.errstate(invalid="ignore", divide="ignore"):
+            recent = r15[num] / r15[den]
+            base = std[num] / std[den]
+            ok = (r15[den] >= floor) & (std[den] >= floor)
+        return np.where(ok, recent - base, np.nan)
+
+    v["proc_whiff15"] = _delta("whiffs", "swings", 30)
+    v["proc_chase15"] = _delta("oz_swings", "oz_n", 30)
+    v["proc_xw15"] = _delta("xwcon_sum", "xwcon_n", 15)
+    return v[["player_id", "season", "_d",
+              "proc_whiff15", "proc_chase15", "proc_xw15"]]
+
+
+def _join_pergame_asof(combined: pd.DataFrame, table: pd.DataFrame,
+                       cols: list[str], id_col: str = "personId") -> pd.DataFrame:
+    """Season-bound as-of join of a per-(player, season, date) feature table:
+    a row matches the player's latest STRICTLY-PRIOR date within the row's own
+    season (April rows get NaN rather than last September's mechanics).
+    """
+    if table.empty:
+        for c in cols:
+            combined[c] = np.nan
+        return combined
+    left = combined.copy()
+    left["_d"] = pd.to_datetime(left["officialDate"], errors="coerce").dt.normalize()
+    left["_by"] = pd.to_numeric(left[id_col], errors="coerce").astype("float64")
+    left["_sn"] = pd.to_numeric(left["season"], errors="coerce").astype("float64")
+    left = left.reset_index().rename(columns={"index": "_row"})
+    ls = left.dropna(subset=["_by", "_d", "_sn"]).sort_values("_d")
+    right = table.copy()
+    right["_by"] = pd.to_numeric(right["player_id"], errors="coerce").astype("float64")
+    right["_sn"] = pd.to_numeric(right["season"], errors="coerce").astype("float64")
+    right = right.dropna(subset=["_by", "_d", "_sn"]).sort_values("_d")
+    merged = pd.merge_asof(ls, right[["_by", "_sn", "_d"] + cols],
+                           on="_d", by=["_by", "_sn"], direction="backward",
+                           allow_exact_matches=False)
+    for c in cols:
         combined[c] = np.nan
         combined.loc[merged["_row"].values, c] = merged[c].values
     return combined
@@ -1041,6 +1362,9 @@ def compute_pitcher_features(history: pd.DataFrame, targets: pd.DataFrame | None
     # pitcher's OWN team's pen fatigue (a taxed pen extends the starter).
     velo_years = sorted(pd.Series(combined["season"]).dropna().unique().tolist())
     combined = _join_velo_asof(combined, _velo_asof_table(velo_years))
+    # Round 6: release-point / spin drift (mechanics canary).
+    combined = _join_pergame_asof(combined, _relspin_asof_table(velo_years),
+                                  ["spin_drop", "rel_drift"])
     combined = _join_pen_fatigue(combined, _pen_fatigue_table(history),
                                  id_col="teamId", prefix="own_")
     combined = _join_league_env(combined, _league_env_table(history))
@@ -1089,7 +1413,13 @@ def _assemble_pitcher_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
         for col, name in [("index_hr", "pf_hr"), ("index_so", "pf_so"),
                           ("index_bb", "pf_bb"), ("index_woba", "pf_woba")]:
             f[name] = pk[col].values
-        # Own-catcher framing deferred to v2 (see batter assembly note).
+        # Round 6: own catcher receiving skill + Y-1 pitch-mix diversity.
+        f["ownc_framing"] = ctx.framing2_lookup(
+            seasons, _series(df, "ownCatcherId").values)
+        f["mix_entropy"] = ctx.mix2_lookup(seasons, df["personId"].values,
+                                           "mix_entropy")
+        f["mix_fbshare"] = ctx.mix2_lookup(seasons, df["personId"].values,
+                                           "fb_share")
 
         # Statcast quality-of-contact allowed (Y-1): xwOBA-against and barrel
         # rate against are stabler talent signals than outcome rates.
@@ -1121,6 +1451,9 @@ def _assemble_pitcher_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
     f["own_pen_2day"] = pd.to_numeric(_series(df, "own_pen_2day"), errors="coerce").values
     # Round-5 block: rolling league environment.
     for c in ("lg_bb30", "lg_k30", "lg_r30", "lg_hr30"):
+        f[c] = pd.to_numeric(_series(df, c), errors="coerce").values
+    # Round-6 blocks: mechanics canary (as-of joins).
+    for c in ("spin_drop", "rel_drift"):
         f[c] = pd.to_numeric(_series(df, c), errors="coerce").values
 
     if universe is not None:

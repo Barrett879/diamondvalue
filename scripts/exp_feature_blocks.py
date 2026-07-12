@@ -5,8 +5,13 @@ mlblib.model.FEATURE_BLOCKS, fit every target twice on 2021-2023 (current
 policy vs policy + block) and evaluate on 2024. Keep decisions are made HERE so
 2025 stays an honest final check.
 
-Usage: python scripts/exp_feature_blocks.py <bat|pit> <block>
-Writes cache/exp_block_{role}_{block}.json
+Usage: python scripts/exp_feature_blocks.py <bat|pit> <block> [eval_year]
+Writes cache/exp_block_{role}_{block}[_{eval_year}].json
+
+eval_year defaults to 2024 (the ablation/tuning year). Pass 2025 to run the
+CONFIRMATION on the held-out year; history always includes 2024 so the
+train/context tables are IDENTICAL to validate_models.py (the round-3/4 audit
+lesson: a thinner confirmation history manufactures false replications).
 """
 from __future__ import annotations
 
@@ -24,15 +29,15 @@ from mlblib.cache import logger  # noqa: E402
 
 PRIOR = [2019, 2020]
 TRAIN = [2021, 2022, 2023]
-VAL = 2024
 CTX_YEARS = list(range(2018, 2027))
 
 
-def main(role: str, block_name: str) -> None:
+def main(role: str, block_name: str, val: int = 2024) -> None:
+    VAL = val
     block = M.FEATURE_BLOCKS[block_name]
     targets = M.BAT_TARGETS if role == "bat" else M.PIT_TARGETS
 
-    hist = F.load_gamelogs(PRIOR + TRAIN + [VAL])
+    hist = F.load_gamelogs(PRIOR + TRAIN + sorted({2024, VAL}))
     hist = F.attach_catchers(hist)
     frames = [cache.read_parquet_or_none(cache.dc_path(f"player_universe_{y}_v1.parquet"))
               for y in CTX_YEARS]
@@ -86,10 +91,12 @@ def main(role: str, block_name: str) -> None:
                        target, row["dev_chg_pct"], row["mae_chg_pct"],
                        "KEEP" if row["keep"] else "drop")
 
-    out = Path("cache") / f"exp_block_{role}_{block_name}.json"
+    tag = "" if VAL == 2024 else f"_{VAL}"
+    out = Path("cache") / f"exp_block_{role}_{block_name}{tag}.json"
     out.write_text(json.dumps(results, indent=1))
     logger.warning("wrote %s", out)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2],
+         int(sys.argv[3]) if len(sys.argv) > 3 else 2024)

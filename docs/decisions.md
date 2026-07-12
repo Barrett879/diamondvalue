@@ -273,3 +273,62 @@ caches full-column chunks (batter, fielder_2/catcher, plate_x/z, sz_top/bot,
 release point/spin, stand/p_throws, xwOBA-on-contact) as red2_* parts,
 2020-2026, resumable, gitignored. Unlocks next round: catcher framing v2,
 batter-vs-velocity, true per-PA platoon, release-point drift.
+
+## Round 6 (2026-07-11 night): the pitch-level v2 re-pull
+
+The v1 pitch pull discarded the columns a real matchup/mechanics round needs.
+Re-pulled 2020-2026 keeping batter, catcher (fielder_2), plate + strike-zone
+coords, release point, spin, handedness, and xwOBA-on-contact (red2_* parts,
+gitignored). Six committed table families (build_pitchlevel_v2_tables.py),
+completeness-gated against gamelogs so a half-pulled season refuses to build.
+Seven candidate blocks, targets PRE-REGISTERED before the 2024 ablations to
+bound multiple testing, then per-block 2025 confirmation on FULL history (the
+round-3/4 anti-thin-history lesson baked into exp_feature_blocks.py's eval-year
+arg). A 3-lens design review and a 4-lens+verify code review ran before the
+gauntlet; both found no leakage/correctness defects (the confirmed findings
+were doc-vs-code reconciliations and one dropped feature, all addressed).
+
+**SHIPPED — release-point / spin drift (relspin_pit): the largest confirmed
+gains in project history, and they GREW on the held-out year.** Per-start
+fastball release point and spin, as-of rolling-3 vs season-to-date, n_fb>=50
+gated, spin league-centered (so the June-2021 sticky-stuff enforcement reads
+as league regime, not individual injury), UNSHIFTED windows + no-exact-date
+join (double-lag would hide the freshest start where the canary lives). 2025:
+p_BF dev -4.79%/MAE -1.52%, p_pitches -4.16%/-1.17% (9.394->9.284 MAE),
+p_outs -2.26%/-0.79%, p_K -0.40%/-0.15%. Same fatigue/mechanics family as
+round-4 velo_trend, stacking on top of it.
+
+**SHIPPED — batter velocity handling (batvelo_bat) for HR + doubles.**
+Cumulative-prior hard-FB (>=95) whiff/xwOBA-on-contact plus the hard-minus-soft
+(<93) whiff gap (each rate shrunk toward its own league mean so the gap shrinks
+toward the league gap) and the opposing starter's rolling fastball velo. HR
+MAE -0.26%, b2 -0.08%, both years. SO passed each block alone but was struck:
+batvelo and batproc both target SO and are redundant -- the joint SO model was
++0.05% MAE / flat dev (a wash), so neither ships it. batproc_bat ships nowhere.
+
+**SHIPPED — true per-PA platoon (platoon2_bat) for BB + singles.** Real
+vs-hand per-PA splits (cumulative prior, split delta shrunk toward the league
+handedness offset, K=1000) replace round 2's whole-game-vs-starter-hand proxy
+as an additive block. BB and b1 replicated (dev down both years); HR/SO were
+2024-only and struck. Round-2 platoon features stay.
+
+**STRUCK — the "supporting catcher" (framing_bat2 / framing_pit2).** Own catcher
+framing granted p_BB on 2024 (dev -0.08%) but FAILED 2025 (+0.17% MAE);
+opposing-catcher framing never granted. Our own shadow-zone framing metric
+(location-bin expected-strike residual, validated against known receiver
+reputations: Trevino/Heim top, Severino/Perez bottom) is sound, but at per-game
+granularity the effect is below the noise floor and the model already carries
+the pitcher's own BB/K rates. Catcher identity is still captured and displayed;
+it is simply not a model input. Barrett's original "supporting catcher ->
+OBS%" hypothesis is answered: measurable, real, but too small to move a
+single-game projection.
+
+**STRUCK — pitch-mix diversity (mix_pit).** p_K granted -0.19% on 2024, a
+mirage (+0.16% on 2025). batproc process-form BB and platoon HR/SO likewise
+2024-only.
+
+Deterministic retrain proof: exactly the 8 granted targets (BB, b1, HR, b2,
+p_outs, p_BF, p_pitches, p_K) changed joblib bytes; nothing else. Inference:
+100% of a live 32-starter slate carried the drift features. Daily updater
+extended to maintain fbvelo + relspin2 + batproc2 from one KEEP2 fetch with a
+self-healing window (CI runner needs no pitch-level parts).

@@ -97,6 +97,38 @@ def _pit_target(pid, name, team_id, is_home, g, opp, hand):
     }
 
 
+def _recent_catcher(history, team_id, before_date, roster) -> float | None:
+    """Most frequent starting catcher over the team's last 10 games, filtered
+    to the current active roster (an IL'd or traded catcher must not keep
+    winning the projection)."""
+    sub = history[(history["teamId"] == team_id)
+                  & (history["officialDate"] < before_date)
+                  & (history["position"] == "C") & history["is_starter_slot"]]
+    if sub.empty:
+        return None
+    recent_pks = (sub[["gamePk", "gameDate"]].drop_duplicates()
+                  .sort_values("gameDate").tail(10)["gamePk"])
+    counts = Counter(sub[sub["gamePk"].isin(recent_pks)]["personId"])
+    roster_ids = {r["id"] for r in roster}
+    for pid, _ in counts.most_common():
+        if pid in roster_ids:
+            return pid
+    return None
+
+
+def _slate_catchers(g, history) -> dict:
+    """Today's catcher per side: GUMBO pregame boxscore position first (the
+    only source with per-game fielding positions), else the last-10-games
+    most-frequent starter still on the roster."""
+    cmap = fetch.get_gumbo_lineup_catchers(g["gamePk"])
+    for side in ("home", "away"):
+        if cmap.get(side) is None:
+            roster = fetch.get_roster(g[side]["id"], date=g["officialDate"])
+            cmap[side] = _recent_catcher(history, g[side]["id"],
+                                         g["officialDate"], roster)
+    return cmap
+
+
 def build_targets(slate, history, uni):
     bat_map = dict(zip(uni["personId"], uni["batSide"]))
     hand_map = dict(zip(uni["personId"], uni["pitchHand"]))
@@ -141,7 +173,24 @@ def build_targets(slate, history, uni):
                                     "lineup_status": status,
                                     "probable": (prob or {}).get("name")}
         slate_meta.append(gmeta)
-    return pd.DataFrame(bat_rows), pd.DataFrame(pit_rows), slate_meta
+    bat_df, pit_df = pd.DataFrame(bat_rows), pd.DataFrame(pit_rows)
+    # Round 6: catcher identities per (gamePk, teamId) for the framing
+    # features -- batters face the OPPOSING catcher, starters throw to their
+    # OWN catcher.
+    cat_map = {}
+    for g in slate:
+        cmap = _slate_catchers(g, history)
+        for side in ("home", "away"):
+            cat_map[(g["gamePk"], g[side]["id"])] = cmap[side]
+    if not bat_df.empty:
+        bat_df["oppCatcherId"] = [cat_map.get((pk, tid))
+                                  for pk, tid in zip(bat_df["gamePk"],
+                                                     bat_df["oppTeamId"])]
+    if not pit_df.empty:
+        pit_df["ownCatcherId"] = [cat_map.get((pk, tid))
+                                  for pk, tid in zip(pit_df["gamePk"],
+                                                     pit_df["teamId"])]
+    return bat_df, pit_df, slate_meta
 
 
 _YDAY_SCHED: dict[str, list] = {}

@@ -25,6 +25,12 @@ cache/raw_statcast/
 !cache/venues_v1.parquet
 !cache/tto_pit_*.parquet
 !cache/fbvelo_*.parquet
+!cache/framing2_*.parquet
+!cache/platoon2_*.parquet
+!cache/batvelo2_*.parquet
+!cache/relspin2_*.parquet
+!cache/mix2_*.parquet
+!cache/batproc2_*.parquet
 !cache/catcher_framing_*.parquet
 !cache/catcher_throwing_*.parquet
 !cache/player_universe_*.parquet
