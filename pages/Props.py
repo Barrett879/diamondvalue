@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -17,6 +18,27 @@ import scripts.fetch_prizepicks as fp  # noqa: E402
 from mlblib import props, store  # noqa: E402
 from mlblib.theme import render_footer, render_nav, render_page_chrome  # noqa: E402
 from mlblib.util import today_iso  # noqa: E402
+
+# One-click grabber: runs in the user's OWN logged-in browser (where PrizePicks
+# is not Cloudflare-blocked), fetches every MLB projection, and copies a clean
+# "Name | Stat | Line" list to the clipboard ready to paste below.
+BOOKMARKLET = (
+    "javascript:(async()=>{try{let o=[],P=1;for(let p=1;p<=P&&p<=8;p++){"
+    "let r=await fetch('https://api.prizepicks.com/projections?league_id=2"
+    "&per_page=250&page='+p+'&single_stat=true',{headers:{Accept:"
+    "'application/json'},credentials:'include'});if(!r.ok){alert('PrizePicks "
+    "returned '+r.status+'. Open prizepicks.com first, then click again.');"
+    "return}let j=await r.json();P=(j.meta&&j.meta.total_pages)||1;let n={};"
+    "(j.included||[]).forEach(i=>{if(i.type=='new_player')n[i.id]="
+    "i.attributes.name});(j.data||[]).forEach(d=>{let a=d.attributes||{},"
+    "x=((d.relationships||{}).new_player||{}).data,m=x?n[x.id]:0;"
+    "if(m&&a.line_score!=null&&a.stat_type)o.push(m+' | '+a.stat_type+' | '"
+    "+a.line_score)})}await navigator.clipboard.writeText(o.join(String."
+    "fromCharCode(10)));alert('Copied '+o.length+' PrizePicks MLB lines. "
+    "Paste them into DiamondValue Props.')}catch(e){alert('Could not fetch "
+    "PrizePicks ('+e+'). Open prizepicks.com in this tab first, then click "
+    "the bookmarklet.')}})();"
+)
 
 st.set_page_config(page_title="Props · DiamondValue", page_icon="static/favicon.svg",
                    layout="wide")
@@ -76,6 +98,28 @@ payload = st.session_state.get("pp_payload") or fp.load_raw(date_iso)
 
 if payload:
     _show(props.parse_prizepicks_json(payload))
+
+# ── One-click grabber (bookmarklet) ─────────────────────────────────────────
+with st.expander("One-click grab (bookmarklet)", expanded=False):
+    st.markdown(
+        "Install this once, then it grabs every MLB line for you. "
+        "**Drag the button below to your bookmarks bar** (or make a new "
+        "bookmark and paste the code as its URL). Then open **prizepicks.com** "
+        "in a tab and click the bookmark: it copies all the lines to your "
+        "clipboard. Come back here, open **Paste lines**, and paste.")
+    # A real draggable javascript: link has to live in an iframe -- Streamlit's
+    # markdown sanitizer strips javascript: hrefs.
+    html = (
+        '<a href="' + BOOKMARKLET.replace('"', "&quot;") + '" '
+        'style="display:inline-block;padding:8px 16px;border-radius:20px;'
+        'background:#0fae9d;color:#fff;font:600 14px Manrope,sans-serif;'
+        'text-decoration:none;cursor:grab" '
+        'onclick="event.preventDefault()">Grab PrizePicks lines</a>'
+        '<div style="font:13px Manrope,sans-serif;color:#71757f;'
+        'margin-top:8px">Drag me up to your bookmarks bar.</div>')
+    components.html(html, height=70)
+    st.caption("Or copy the code and paste it as a new bookmark's URL:")
+    st.code(BOOKMARKLET, language="javascript")
 
 # ── Paste fallback (the reliable path) ──────────────────────────────────────
 with st.expander("Paste lines (recommended)", expanded=payload is None):
