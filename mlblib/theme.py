@@ -24,7 +24,6 @@ THEME_DEFAULT_DARK = False
 # Nav pages: (label, url). Home is rendered separately.
 _NAV_PAGES = [
     ("Player", "/Player"),
-    ("Props", "/Props"),
     ("Accuracy", "/Accuracy"),
     ("About", "/About"),
 ]
@@ -493,6 +492,25 @@ COMMON_CSS = """
     }
     .dv-team-sp { color: var(--fg-4); font-size: 0.9rem; font-weight: 500; }
     .dv-team-sp b { color: var(--fg-2); font-weight: 600; }
+
+    /* Game hero: team-color underline under each abbreviation (color never
+       touches the text, so it stays legible; --rail-lift keeps dark navies
+       visible on the near-black bg). Extra bottom room keeps the underline
+       under the abbreviations and clear of the date line below. */
+    .dv-game-hero .dv-brand {
+        display: inline-block; line-height: 1.06;
+        padding-bottom: 0.4rem; margin-bottom: 0.25rem;
+    }
+    .dv-hero-away, .dv-hero-home {
+        border-bottom: 5px solid var(--fg-5); padding-bottom: 1px;
+        border-radius: 1px;
+    }
+    @supports (color: color-mix(in srgb, red, white)) {
+        .dv-hero-away { border-bottom-color:
+            color-mix(in srgb, var(--away, var(--fg-5)), #fff var(--rail-lift)); }
+        .dv-hero-home { border-bottom-color:
+            color-mix(in srgb, var(--home, var(--fg-5)), #fff var(--rail-lift)); }
+    }
 
     /* Themed stat tables (replace st.dataframe) */
     .dv-table-wrap {

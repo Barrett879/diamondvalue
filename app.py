@@ -14,6 +14,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import props_ui  # noqa: E402
 from mlblib import fetch, store  # noqa: E402
 from mlblib.teams import team_color  # noqa: E402
 from mlblib.theme import (  # noqa: E402
@@ -199,5 +200,15 @@ st.markdown(f'<div class="dv-slate-grid">{"".join(cards)}</div>',
 st.caption("Pitcher strikeouts are the most predictable per-game stat. Batter "
            "single-game numbers are low-signal by nature; treat every value as "
            "a distribution mean.")
+
+# ── PrizePicks: load lines for the whole slate; biggest edges surface here and
+# on every game page. Collapsed by default so it never clutters the slate. ────
+_preds_full = store.load_predictions(date_iso)
+if _preds_full is not None and not _preds_full.empty:
+    st.markdown('<div class="dv-bar-rule"></div>', unsafe_allow_html=True)
+    props_ui.resolve_and_persist(date_iso)
+    props_ui.render_board(_preds_full, date_iso, scope_label="the slate")
+    with st.expander("Add / update PrizePicks lines", expanded=False):
+        props_ui.render_input(date_iso)
 
 render_footer()

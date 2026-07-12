@@ -12,7 +12,9 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from mlblib import fetch, props, store  # noqa: E402
+import props_ui  # noqa: E402
+from mlblib import fetch, store  # noqa: E402
+from mlblib.teams import team_color  # noqa: E402
 from mlblib.theme import (  # noqa: E402
     SENTINEL,
     render_footer,
@@ -48,6 +50,20 @@ except (TypeError, ValueError):
     st.stop()
 
 
+def _hero(away: str, home: str, date: str, et: str) -> None:
+    """Team-colored game header: the AWAY @ HOME wordmark with each abbreviation
+    underlined in its team color, over the date/time line."""
+    ac, _ = team_color(away)
+    hc, _ = team_color(home)
+    st.markdown(
+        f'<div class="dv-game-hero" style="--away:{ac};--home:{hc}">'
+        f'<div class="dv-brand"><span class="dv-hero-away">{away}</span> '
+        f'<span class="accent">@</span> '
+        f'<span class="dv-hero-home">{home}</span></div>'
+        f'<div class="dv-tagline">{date} &nbsp; {et}</div></div>',
+        unsafe_allow_html=True)
+
+
 def _badge(status: str) -> str:
     label = "Lineup posted" if status == "confirmed" else "Projected lineup"
     return f'<span class="dv-badge {status}">{label}</span>'
@@ -76,59 +92,14 @@ def _render_side(side_df: pd.DataFrame, team_name: str, probable: str | None,
         st.markdown(store.html_batter_table(bench), unsafe_allow_html=True)
 
 
-def _render_market_board(gp: pd.DataFrame, date: str) -> None:
-    """Model-vs-PrizePicks section for this game: a 'biggest gaps' strip over
-    the full model-vs-line ledger. Both rank by ABSOLUTE gap (model minus line)
-    so the strip's leading chip is the ledger's top row -- the biggest
-    difference. Offline and informational. Renders nothing when no lines are
-    stored for the date, or when none of this game's players have a posted,
-    mappable line.
-    """
-    lines = props.load_lines(date)
-    if lines is None or lines.empty:
-        return
-    table, meta = props.compare(lines, gp)  # restricted to THIS game
-    if table.empty:
-        return
-    st.markdown('<div class="dv-eyebrow">Model vs the board &middot; '
-                'PrizePicks lines</div>', unsafe_allow_html=True)
-
-    # table is already sorted by |edge| desc. Drop rounded-zero gaps (a chip
-    # with identical numbers carries no signal). Bar = |edge| vs the game's
-    # biggest gap, so the leading chip is full and the rest are proportional.
-    strip = table[table["Edge"].abs() >= 0.005]
-    chips = strip.head(6)
-    if not chips.empty:
-        top = float(chips["Edge"].abs().max()) or 1.0
-        parts = []
-        for _, r in chips.iterrows():
-            d = "over" if r["Edge"] > 0 else "under"
-            w = int(round(abs(float(r["Edge"])) / top * 100))
-            parts.append(
-                f'<div class="dv-edge-chip {d}">'
-                f'<span class="ec-player">{store._esc(r["Player"])}</span>'
-                f'<span class="ec-stat">{store._esc(r["Stat"])}</span>'
-                f'<span class="ec-nums">{r["Model"]:g} '
-                f'<span class="ec-vs">vs</span> {r["Line"]:g} &middot; '
-                f'<span class="ec-lean-{d}">{r["Lean"]}</span></span>'
-                f'<span class="ec-bar"><i style="width:{w}%"></i></span>'
-                f"</div>")
-        n_more = len(strip) - len(chips)
-        if n_more > 0:
-            parts.append(f'<span class="dv-edge-more">+{n_more} more</span>')
-        st.markdown(f'<div class="dv-edge-strip">{"".join(parts)}</div>',
-                    unsafe_allow_html=True)
-
-    # Full ledger: same renderer/columns/order as the Props page (|edge| desc).
-    st.markdown(store.html_df(table, label_cols=3, hero=("Edge",)),
-                unsafe_allow_html=True)
-    saved = props.saved_at_et(lines.attrs.get("saved_at"))
-    note = f"{meta['matched']} posted line(s) for this game"
-    if saved:
-        note += f" · lines saved {saved}"
-    note += (" · model means vs posted lines, informational, "
-             "not a wager recommendation.")
-    st.caption(note)
+def _render_market_section(gp: pd.DataFrame, date: str) -> None:
+    """The one-stop PrizePicks section: persist any freshly-entered lines,
+    show this game's model-vs-line board, and offer the line input inline
+    (expanded when nothing is loaded yet)."""
+    props_ui.resolve_and_persist(date)
+    matched = props_ui.render_board(gp, date, scope_label="this game")
+    with st.expander("Add / update PrizePicks lines", expanded=matched == 0):
+        props_ui.render_input(date)
 
 
 # ── Try the generated predictions first ──────────────────────────────────────
@@ -146,9 +117,7 @@ if has_numbers and meta:
         st.stop()
     et = game_time_et(m.get("gameDate"))
     away, home = m.get("away", "AWY"), m.get("home", "HOM")
-    st.markdown(f'<div class="dv-brand">{away} <span class="accent">@</span> {home}</div>'
-                f'<div class="dv-tagline">{date} &nbsp; {et}</div>',
-                unsafe_allow_html=True)
+    _hero(away, home, date, et)
     # Stack the two teams full-width so every predicted column is readable
     # (side-by-side would squeeze the 17-column batter tables).
     tinfo = m.get("teams", {})
@@ -159,8 +128,8 @@ if has_numbers and meta:
                      t.get("lineup_status", "projected"))
         st.divider()
     try:
-        _render_market_board(gp, date)
-    except Exception:  # noqa: BLE001 — the market board must never break the game view
+        _render_market_section(gp, date)
+    except Exception:  # noqa: BLE001 — the market section must never break the game view
         pass
     st.caption("Every number is an expected value, the mean of a distribution, "
                "not a prediction of what will happen. See the About page.")
@@ -179,8 +148,7 @@ if g is None:
 et = game_time_et(g.get("gameDate"))
 a = g["away"]["abbr"] or g["away"]["name"]
 h = g["home"]["abbr"] or g["home"]["name"]
-st.markdown(f'<div class="dv-brand">{a} <span class="accent">@</span> {h}</div>'
-            f'<div class="dv-tagline">{date} &nbsp; {et}</div>', unsafe_allow_html=True)
+_hero(a, h, date, et)
 st.info("Predictions for this date have not been generated yet. Showing the "
         "posted lineups and probable starters.")
 for team in (g["away"], g["home"]):
