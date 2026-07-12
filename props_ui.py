@@ -194,25 +194,51 @@ def render_input(date_iso: str) -> None:
             "1. Show the bookmarks bar (&#8984;&#8679;B).<br>"
             "2. Drag the teal button below onto the **bookmarks bar** (not the "
             "address bar).<br>"
-            "**Safari:** dragging turns into a search, so instead press "
-            "&#8984;D to bookmark any page, open **Bookmarks &rsaquo; Edit "
-            "Bookmarks**, and paste the code (shown under the button) into that "
+            "**Safari:** dragging turns into a search, so instead **click the "
+            "button to copy it**, press &#8984;D to bookmark any page, open "
+            "**Bookmarks &rsaquo; Edit Bookmarks**, and paste it into that "
             "bookmark's **Address** field.<br><br>"
             "**Each day:** open **prizepicks.com** (signed in), click the "
             "bookmark, come back here, paste in the box, click **Add these "
             "lines**. That is the whole board in one paste.",
             unsafe_allow_html=True)
+        # The <a href> holds the bookmarklet so Chrome can DRAG it to the
+        # bookmarks bar; clicking instead COPIES it (Safari can't drag a
+        # javascript: link, so click-to-copy is its path). The component iframe
+        # carries clipboard-write, so navigator.clipboard works on the real
+        # click; execCommand is the fallback, and the st.code block below is the
+        # last resort if a browser blocks both.
+        grab = BOOKMARKLET.replace('"', "&quot;")
         html = (
-            '<a href="' + BOOKMARKLET.replace('"', "&quot;") + '" '
+            '<a id="pp-grab" href="' + grab + '" '
             'style="display:inline-block;padding:9px 18px;border-radius:20px;'
             'background:#0fae9d;color:#fff;font:600 14px Manrope,sans-serif;'
-            'text-decoration:none;cursor:grab" '
-            'onclick="event.preventDefault()">Grab PrizePicks lines</a>'
-            '<div style="font:13px Manrope,sans-serif;color:#71757f;'
-            'margin-top:8px">Drag me to your bookmarks bar (not the search bar).'
-            "</div>")
-        components.html(html, height=70)
-        st.caption("Safari: copy this and paste it as the bookmark's Address:")
+            'text-decoration:none;cursor:pointer">Grab PrizePicks lines</a>'
+            '<div id="pp-hint" style="font:13px Manrope,sans-serif;color:#71757f;'
+            'margin-top:8px;line-height:1.45">Chrome: drag me to the bookmarks '
+            "bar. Safari: click me to copy, then paste into a new "
+            "bookmark&rsquo;s Address.</div>"
+            "<script>(function(){"
+            'var a=document.getElementById("pp-grab"),'
+            'h=document.getElementById("pp-hint");if(!a)return;'
+            'function done(ok){h.style.color=ok?"#0b8f80":"#c0392b";'
+            'h.textContent=ok?"Copied. Now press Cmd+D to bookmark any page, open '
+            'Bookmarks > Edit Bookmarks, and paste this as its Address.":'
+            '"Could not copy here - use the code box below instead.";}'
+            'function fallback(code){try{var t=document.createElement("textarea");'
+            't.value=code;t.style.position="fixed";t.style.top="-1000px";'
+            "document.body.appendChild(t);t.focus();t.select();"
+            'var ok=document.execCommand("copy");document.body.removeChild(t);'
+            "done(ok);}catch(err){done(false);}}"
+            'a.addEventListener("click",function(e){e.preventDefault();'
+            'var code=a.getAttribute("href");'
+            "if(navigator.clipboard&&navigator.clipboard.writeText){"
+            "navigator.clipboard.writeText(code).then(function(){done(true);},"
+            "function(){fallback(code);});}else{fallback(code);}});})();"
+            "</script>")
+        components.html(html, height=115)
+        st.caption("Or copy this code manually and paste it as the bookmark's "
+                   "Address:")
         st.code(BOOKMARKLET, language="javascript")
 
     # ── Manual alternative: paste the feed or a stat tab from the board. ──
