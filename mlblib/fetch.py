@@ -368,12 +368,15 @@ def get_park_factors_raw(year: int, bat_side: str = "") -> list[dict] | None:
 
 def get_forecast(lat: float, lon: float, date_iso: str) -> dict | None:
     """Hourly forecast for one venue-day from Open-Meteo (keyless, free for
-    non-commercial use). Returns {hour_iso_utc: (temp_f, wind_mph, wind_dir)}
-    or None on failure (features degrade to NaN, never block).
+    non-commercial use). Returns
+    {hour_iso_utc: (temp_f, wind_mph, wind_dir, rh_pct, surface_press_hPa)}
+    or None on failure (features degrade to NaN, never block). rh/press feed
+    the air-density carry index; temp/wind/dir feed the shipped weather block.
     """
     params = {
         "latitude": lat, "longitude": lon,
-        "hourly": "temperature_2m,wind_speed_10m,wind_direction_10m",
+        "hourly": ("temperature_2m,wind_speed_10m,wind_direction_10m,"
+                   "relative_humidity_2m,surface_pressure"),
         "temperature_unit": "fahrenheit", "wind_speed_unit": "mph",
         "timezone": "UTC",
         "start_date": date_iso, "end_date": date_iso,
@@ -384,10 +387,36 @@ def get_forecast(lat: float, lon: float, date_iso: str) -> dict | None:
         return None
     h = data["hourly"]
     out = {}
-    for t, temp, ws, wd in zip(h.get("time", []), h.get("temperature_2m", []),
-                               h.get("wind_speed_10m", []),
-                               h.get("wind_direction_10m", [])):
-        out[t] = (temp, ws, wd)
+    for t, temp, ws, wd, rh, press in zip(
+            h.get("time", []), h.get("temperature_2m", []),
+            h.get("wind_speed_10m", []), h.get("wind_direction_10m", []),
+            h.get("relative_humidity_2m", []), h.get("surface_pressure", [])):
+        out[t] = (temp, ws, wd, rh, press)
+    return out
+
+
+def get_weather_archive(lat: float, lon: float, start: str, end: str) -> dict | None:
+    """Historical hourly weather for one venue over a date range from the
+    Open-Meteo ARCHIVE (keyless, reanalysis). Returns
+    {hour_iso_utc: (temp_f, rh_pct, surface_press_hPa)} or None on failure.
+    """
+    params = {
+        "latitude": lat, "longitude": lon,
+        "hourly": "temperature_2m,relative_humidity_2m,surface_pressure",
+        "temperature_unit": "fahrenheit", "timezone": "UTC",
+        "start_date": start, "end_date": end,
+    }
+    data = _http_json("https://archive-api.open-meteo.com/v1/archive", params,
+                      have_stale=True)
+    if not data or "hourly" not in data:
+        return None
+    h = data["hourly"]
+    out = {}
+    for t, temp, rh, press in zip(h.get("time", []),
+                                  h.get("temperature_2m", []),
+                                  h.get("relative_humidity_2m", []),
+                                  h.get("surface_pressure", [])):
+        out[t] = (temp, rh, press)
     return out
 
 

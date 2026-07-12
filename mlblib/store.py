@@ -84,3 +84,61 @@ def format_pitcher_table(df: pd.DataFrame) -> pd.DataFrame:
     for _, r in df.iterrows():
         rows.append({header: _fmt(r.get(col), dec) for col, header, dec in PIT_DISPLAY})
     return pd.DataFrame(rows, columns=[h for _, h, _ in PIT_DISPLAY])
+
+
+# ── Themed HTML tables (replace the default st.dataframe widget) ─────────────
+def _esc(s) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def html_stat_table(str_df: pd.DataFrame, label_cols: int = 1,
+                    hero: tuple = ()) -> str:
+    """Render a formatted string table as a themed, responsive HTML table.
+    The first `label_cols` columns are left-aligned text (slot/name); the rest
+    are right-aligned tabular numbers. `hero` column headers get a subtle
+    emphasis so the eye lands on the marquee stat.
+    """
+    cols = list(str_df.columns)
+    head = "".join(
+        (f'<th class="l">{_esc(c)}</th>' if i < label_cols else f'<th>{_esc(c)}</th>')
+        for i, c in enumerate(cols))
+    name_idx = label_cols - 1   # the last label column is the player/pitcher name
+    body = []
+    for _, r in str_df.iterrows():
+        cells = []
+        for i, c in enumerate(cols):
+            if i < label_cols:
+                cls = "name l" if i == name_idx else "slot l"
+            else:
+                cls = "hero" if c in hero else ""
+            cells.append(f'<td class="{cls}">{_esc(r[c])}</td>')
+        body.append(f"<tr>{''.join(cells)}</tr>")
+    return (
+        '<div class="dv-table-wrap"><table class="dv-table">'
+        f'<thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody>'
+        "</table></div>"
+    )
+
+
+def html_batter_table(df: pd.DataFrame) -> str:
+    return html_stat_table(format_batter_table(df), label_cols=2, hero=("HR", "TB"))
+
+
+def html_pitcher_table(df: pd.DataFrame) -> str:
+    return html_stat_table(format_pitcher_table(df), label_cols=1, hero=("K",))
+
+
+def html_df(df: pd.DataFrame, label_cols: int = 1, hero: tuple = (),
+            rename: dict | None = None) -> str:
+    """Themed render of an arbitrary DataFrame (floats to 3 dp, ints plain).
+    For the analytics tables (accuracy tracker) so every table on the site
+    shares one look."""
+    out = df.copy()
+    if rename:
+        out = out.rename(columns=rename)
+    for c in out.columns:
+        if pd.api.types.is_float_dtype(out[c]):
+            out[c] = out[c].map(lambda v: SENTINEL if v != v else f"{v:.3f}")
+        else:
+            out[c] = out[c].astype(str)
+    return html_stat_table(out, label_cols=label_cols, hero=hero)

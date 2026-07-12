@@ -73,7 +73,7 @@ st.subheader(pick)
 if role == "bat":
     st.caption(f"Projected line for {date_iso}"
                + ("  ·  bench (per game if he starts)" if row.get("is_bench") else ""))
-    st.dataframe(store.format_batter_table(rows), hide_index=True, use_container_width=True)
+    st.markdown(store.html_batter_table(rows), unsafe_allow_html=True)
     st.markdown("**What the model saw**")
     inp = {
         "Expected PA (Marcel prior)": row.get("marcel_PApg"),
@@ -84,7 +84,7 @@ if role == "bat":
               for k, v in inp.items()})
 else:
     st.caption(f"Projected start for {date_iso}")
-    st.dataframe(store.format_pitcher_table(rows), hide_index=True, use_container_width=True)
+    st.markdown(store.html_pitcher_table(rows), unsafe_allow_html=True)
 
 # Recent predicted-vs-actual, from the accuracy tracker (if built).
 acc_path = cache.dc_path("accuracy_history_v1.parquet")
@@ -93,7 +93,9 @@ if acc is not None and "personId" in acc.columns:
     hist = acc[acc["personId"] == row["personId"]]
     if not hist.empty:
         st.markdown("**Recent predicted vs actual**")
-        st.dataframe(hist.sort_values("date").tail(20), hide_index=True,
-                     use_container_width=True)
+        cols = [c for c in ("date", "stat", "pred", "actual", "abs_err_model")
+                if c in hist.columns]
+        st.markdown(store.html_df(hist.sort_values("date").tail(20)[cols],
+                                  label_cols=2), unsafe_allow_html=True)
 
 render_footer()

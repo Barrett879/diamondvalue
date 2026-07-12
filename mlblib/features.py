@@ -67,6 +67,62 @@ def load_gamelogs(seasons: list[int]) -> pd.DataFrame:
     return out
 
 
+def air_carry_index(temp_f, rh, press_hpa):
+    """Batted-ball carry index from game weather: 1.225 / air_density, where
+    air density (kg/m^3) is the sum of dry-air and water-vapor partial-pressure
+    terms via the Magnus saturation formula. >1 = thinner air than the
+    sea-level 15C standard = the ball carries farther. Vectorized (accepts
+    scalars or arrays); returns NaN where any input is missing. `press_hpa` is
+    the STATION surface pressure (already altitude-adjusted -- do not re-adjust).
+    """
+    temp_f = pd.to_numeric(pd.Series(temp_f), errors="coerce").astype(float)
+    rh = pd.to_numeric(pd.Series(rh), errors="coerce").astype(float)
+    press = pd.to_numeric(pd.Series(press_hpa), errors="coerce").astype(float)
+    tc = (temp_f - 32.0) * 5.0 / 9.0
+    tk = tc + 273.15
+    psat = 6.1078 * 10.0 ** (7.5 * tc / (tc + 237.3))    # hPa
+    pv = (rh / 100.0) * psat                              # hPa vapor pressure
+    pd_dry = press - pv                                   # hPa dry partial
+    with np.errstate(invalid="ignore", divide="ignore"):
+        rho = (pd_dry * 100.0) / (287.058 * tk) + (pv * 100.0) / (461.495 * tk)
+        ci = 1.225 / rho
+    ci = ci.where((rho > 0) & tk.notna() & press.notna() & rh.notna())
+    return ci.values
+
+
+def station_pressure_hpa(elev_ft):
+    """Standard-atmosphere station pressure (hPa) from elevation in FEET (the
+    unit venues_v1.elevation stores). Used for CLOSED-roof games, where the
+    reanalysis outdoor pressure is irrelevant but the park still sits at its
+    altitude (a Denver dome is thinner air than a sea-level dome even climate-
+    controlled)."""
+    elev_m = pd.to_numeric(pd.Series(elev_ft), errors="coerce").astype(float) * 0.3048
+    return (1013.25 * (1.0 - 2.25577e-5 * elev_m) ** 5.25588).values
+
+
+def indoor_carry_index(elev_ft):
+    """Carry index for a climate-controlled closed roof: 72F, 50% RH at the
+    park's elevation pressure. An elevation-driven per-park constant."""
+    return air_carry_index(72.0, 50.0, station_pressure_hpa(elev_ft))
+
+
+def blend_carry(roof_type, indoor_ci, outdoor_ci, closed_share):
+    """Parity-shared per-game carry index (scalars), keyed ONLY on roof TYPE
+    and the park's historical closed share -- never the actual per-game roof
+    (unknown at inference). Dome -> indoor; Retractable -> closed_share blend
+    of indoor/outdoor; Open -> outdoor. Called identically by the training
+    table build and the daily inference pipeline."""
+    ok_out = outdoor_ci == outdoor_ci
+    ok_in = indoor_ci == indoor_ci
+    if roof_type == "Dome":
+        return indoor_ci
+    if roof_type == "Retractable":
+        if ok_out and ok_in:
+            return closed_share * indoor_ci + (1.0 - closed_share) * outdoor_ci
+        return outdoor_ci if ok_out else indoor_ci
+    return outdoor_ci  # Open
+
+
 def attach_catchers(history: pd.DataFrame) -> pd.DataFrame:
     """Add ownCatcherId (the player's own team's starting catcher for the game)
     and oppCatcherId (the opposing team's starting catcher). The starting
@@ -176,6 +232,14 @@ class Context:
         # Per-game environment (parsed from cached boxscores) + venue geometry.
         gw = cache.read_parquet_or_none(cache.dc_path("game_weather_v1.parquet"))
         self.game_weather = gw if gw is not None else pd.DataFrame()
+        ad = cache.read_parquet_or_none(cache.dc_path("game_airdensity_v1.parquet"))
+        self.game_airdensity = ad if ad is not None else pd.DataFrame()
+        # Venue climatological carry mean (a fixed geographic constant): the
+        # park-demeaned anomaly = game carry minus this is the ONLY component of
+        # carry orthogonal to the Y-1 park HR factor pf_hr.
+        self.venue_carry_mean = (dict(ad.groupby("venue_id")["carry_index"].mean())
+                                 if ad is not None and "venue_id" in ad.columns
+                                 else {})
         vn = cache.read_parquet_or_none(cache.dc_path("venues_v1.parquet"))
         self.venues = vn if vn is not None else pd.DataFrame()
 
@@ -771,6 +835,9 @@ def _assemble_batter_feature_cols(df, league, ctx, universe,
     # Round-6 blocks: process form (as-of joins) + opposing starter velo.
     for c in ("proc_whiff15", "proc_chase15", "proc_xw15", "opp_sp_ffvelo"):
         f[c] = pd.to_numeric(_series(df, c), errors="coerce").values
+    # Round-7 block: air-density carry index (physical, altitude-aware).
+    f["env_carry"] = pd.to_numeric(_series(df, "env_carry"), errors="coerce").values
+    f["env_carry_anom"] = pd.to_numeric(_series(df, "env_carry_anom"), errors="coerce").values
 
     # Park factors (Y-1, by batter hand) and opposing catcher metrics, vectorized.
     if ctx is not None:
@@ -892,6 +959,23 @@ def _attach_environment(combined: pd.DataFrame, ctx, history: pd.DataFrame) -> p
         provided = pd.to_numeric(_series(combined, prov), errors="coerce")
         combined[out] = provided.fillna(pd.to_numeric(combined[gwcol],
                                                       errors="coerce")).values
+
+    # Air-density carry index (round 7): training rows read the archive-priced
+    # per-game table; inference rows carry a pipeline-provided carry_index
+    # (forecast + dome/retractable handling) which wins the coalesce.
+    ad = getattr(ctx, "game_airdensity", None)
+    if ad is not None and not ad.empty:
+        combined = combined.merge(
+            ad.rename(columns={"carry_index": "_ad_ci"})[["gamePk", "_ad_ci"]],
+            on="gamePk", how="left")
+    else:
+        combined["_ad_ci"] = np.nan
+    prov_ci = pd.to_numeric(_series(combined, "carry_index"), errors="coerce")
+    combined["env_carry"] = prov_ci.fillna(
+        pd.to_numeric(combined["_ad_ci"], errors="coerce")).values
+    vmean = getattr(ctx, "venue_carry_mean", {}) or {}
+    park_mean = pd.to_numeric(combined["venue_id"].map(vmean), errors="coerce")
+    combined["env_carry_anom"] = (combined["env_carry"] - park_mean).values
     ump_name = _series(combined, "hp_ump").fillna(combined["_gw_ump"])
     combined["_ump"] = ump_name.values
 
@@ -1455,6 +1539,9 @@ def _assemble_pitcher_feature_cols(df, league, ctx, universe) -> pd.DataFrame:
     # Round-6 blocks: mechanics canary (as-of joins).
     for c in ("spin_drop", "rel_drift"):
         f[c] = pd.to_numeric(_series(df, c), errors="coerce").values
+    # Round-7 block: air-density carry index.
+    f["env_carry"] = pd.to_numeric(_series(df, "env_carry"), errors="coerce").values
+    f["env_carry_anom"] = pd.to_numeric(_series(df, "env_carry_anom"), errors="coerce").values
 
     if universe is not None:
         bmap = dict(zip(universe["personId"], universe["birthDate"]))

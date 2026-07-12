@@ -22,6 +22,7 @@ cache/raw_statcast/
 !cache/arsenal_*.parquet
 !cache/disc_*.parquet
 !cache/game_weather_v1.parquet
+!cache/game_airdensity_v1.parquet
 !cache/venues_v1.parquet
 !cache/tto_pit_*.parquet
 !cache/fbvelo_*.parquet
@@ -37,3 +38,4 @@ cache/raw_statcast/
 !cache/predictions_*.parquet
 !cache/slate_*.json
 !cache/accuracy_history_*.parquet
+cache/raw_airdensity/

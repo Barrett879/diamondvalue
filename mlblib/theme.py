@@ -188,7 +188,12 @@ COMMON_CSS = """
     }
 
     /* Clear the fixed nav bar */
-    .block-container { padding-top: 4.4rem; max-width: 1180px; }
+    .block-container { padding-top: 3.6rem; max-width: 1180px; }
+    /* Collapse the empty spacer rows Streamlit leaves around injected <style>
+       blocks (the CSS still applies from a display:none subtree). */
+    .stElementContainer:has([data-testid="stMarkdownContainer"] > style:only-child) {
+        display: none !important;
+    }
     #MainMenu, header[data-testid="stHeader"], footer { visibility: hidden; }
     [data-testid="stToolbar"]        { display: none !important; }
     [data-testid="stDecoration"]     { display: none !important; }
@@ -294,6 +299,55 @@ COMMON_CSS = """
         font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem;
     }
     a.dv-back:hover { filter: brightness(1.1); }
+
+    /* Section eyebrow label above each table */
+    .dv-eyebrow {
+        font-size: 0.7rem; font-weight: 700; letter-spacing: 0.11em;
+        text-transform: uppercase; color: var(--fg-5);
+        margin: 0.9rem 0 0.35rem;
+    }
+    /* Team header block */
+    .dv-team {
+        display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+        margin: 0.4rem 0 0.1rem;
+    }
+    .dv-team-name {
+        font-family: 'Space Grotesk', sans-serif; font-size: 1.5rem;
+        font-weight: 700; letter-spacing: -0.01em; color: var(--fg-1);
+    }
+    .dv-team-sp { color: var(--fg-4); font-size: 0.9rem; font-weight: 500; }
+    .dv-team-sp b { color: var(--fg-2); font-weight: 600; }
+
+    /* Themed stat tables (replace st.dataframe) */
+    .dv-table-wrap {
+        overflow-x: auto; border: 1px solid var(--panel-line);
+        border-radius: 12px; box-shadow: var(--shadow-card);
+        background: var(--panel); margin: 0 0 0.5rem;
+        -webkit-overflow-scrolling: touch;
+    }
+    .dv-table {
+        border-collapse: collapse; width: 100%;
+        font-variant-numeric: tabular-nums; font-size: 0.86rem;
+    }
+    .dv-table thead th {
+        position: sticky; top: 0; z-index: 1; background: var(--panel-2);
+        font-family: 'Space Grotesk', sans-serif; font-weight: 600;
+        font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase;
+        color: var(--fg-4); text-align: right; padding: 0.55rem 0.75rem;
+        white-space: nowrap; border-bottom: 1px solid var(--panel-line);
+    }
+    .dv-table thead th.l { text-align: left; }
+    .dv-table tbody td {
+        padding: 0.5rem 0.75rem; text-align: right; color: var(--fg-3);
+        border-bottom: 1px solid var(--hairline-soft); white-space: nowrap;
+    }
+    .dv-table tbody td.l { text-align: left; }
+    .dv-table tbody td.name { color: var(--fg-1); font-weight: 600; }
+    .dv-table tbody td.slot { color: var(--fg-5); font-weight: 500; }
+    .dv-table tbody td.hero { color: var(--fg-1); font-weight: 600; }
+    .dv-table tbody tr:nth-child(even) td { background: var(--row-tint); }
+    .dv-table tbody tr:hover td { background: var(--panel-hover); }
+    .dv-table tbody tr:last-child td { border-bottom: none; }
 
     /* Footer: HoopsValue's layout adapted */
     .dv-footer { margin-top: 3.5rem; padding-top: 1.4rem; font-size: 0.85rem; }

@@ -332,3 +332,50 @@ p_outs, p_BF, p_pitches, p_K) changed joblib bytes; nothing else. Inference:
 100% of a live 32-starter slate carried the drift features. Daily updater
 extended to maintain fbvelo + relspin2 + batproc2 from one KEEP2 fetch with a
 self-healing window (CI runner needs no pitch-level parts).
+
+## Round 7 (2026-07-11 night): air-density carry -- NEGATIVE RESULT (nothing shipped)
+
+Hypothesis: a fly ball carries farther in thinner air, and the model sees game
+temperature but never elevation/pressure, so it cannot tell that Coors turns
+warning-track outs into home runs. Built a per-game carry index (1.225/air-
+density from Open-Meteo reanalysis temp+humidity+pressure at first pitch, all
+14,886 games; Coors the clear top park at 1.24 vs next 1.09; validated Coors
+archive-vs-forecast pressure parity to 3 hPa).
+
+A 2-lens design review made the load-bearing call BEFORE the gauntlet: raw
+carry is dominated by the 1/T term (= the already-shipped, already-rejected-
+for-batters temperature feature), and its cross-park variation duplicates the
+Y-1 park HR factor pf_hr. The only component orthogonal to both is the
+park-demeaned day-to-day anomaly (a ~2% within-park density swing). So the
+round tested BOTH raw carry and the park anomaly as separate blocks, with
+roof parity keyed only on roof-type + closed-share (shared F.blend_carry),
+elevation-in-feet fixed, b3 dropped (thin air REDUCES triples), tight targets.
+
+Gauntlet verdict: exactly as predicted. Batter side granted NOTHING on 2024
+(HR failed the MAE floor for both raw and anomaly). Pitcher p_HR/p_H granted
+marginally on 2024 (dev -0.05% to -0.08%) for both blocks, then ALL FOUR
+FAILED 2025 -- deviance flipped positive (+0.08% to +0.38%). A byte-identical
+retrain confirms nothing shipped: the env_carry / env_carry_anom columns are
+gated out of every model. The fourth designed feature the gauntlet has
+correctly rejected (bias loop, catcher framing, mix diversity, now air
+density). The physics was right; the signal was already in the model.
+
+Infrastructure KEPT (committed, tested, gated to nothing) for possible reuse:
+game_airdensity_v1 table, build_airdensity_tables.py, the F.air_carry_index /
+station_pressure_hpa / indoor_carry_index / blend_carry helpers, the forecast
+humidity/pressure extension, and the inference carry plumbing. Barrett's
+altitude intuition is sound; it just does not add over pf_hr + temperature at
+single-game granularity.
+
+## UI polish (2026-07-11): themed HTML stat tables site-wide
+
+Replaced every st.dataframe with themed HTML tables (store.html_batter_table /
+html_pitcher_table / html_df + the .dv-table CSS): rounded shadowed container,
+Space Grotesk uppercase headers, tabular-nums, zebra striping, sticky header,
+row hover, left-aligned name / right-aligned numbers, and a subtle bold accent
+on the marquee column (HR+TB for batters, K for pitchers, Edge on Accuracy).
+Game page gained section eyebrows and a real team header; collapsed the empty
+spacer rows Streamlit leaves around injected <style> blocks (tighter top).
+Accuracy chart rebuilt as a sorted horizontal "% better than season average"
+bar (scale-free, so Pitches at ~9 MAE no longer dwarfs the rate stats).
+Verified in light and dark, no console errors.

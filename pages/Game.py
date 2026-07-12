@@ -55,23 +55,25 @@ def _badge(status: str) -> str:
 
 def _render_side(side_df: pd.DataFrame, team_name: str, probable: str | None,
                  status: str):
-    st.markdown(f"### {team_name}", unsafe_allow_html=True)
-    st.markdown(f"<span class='dv-note'>SP: {probable or 'TBD'}</span> {_badge(status)}",
-                unsafe_allow_html=True)
+    sp = f"SP: <b>{probable}</b>" if probable else "SP: TBD"
+    st.markdown(
+        f'<div class="dv-team"><span class="dv-team-name">{team_name}</span>'
+        f'<span class="dv-team-sp">{sp}</span>{_badge(status)}</div>',
+        unsafe_allow_html=True)
     pit_df = side_df[side_df["role"] == "pit"]
     if not pit_df.empty:
-        st.caption("Starting pitcher (expected)")
-        st.dataframe(store.format_pitcher_table(pit_df), hide_index=True,
-                     use_container_width=True)
+        st.markdown('<div class="dv-eyebrow">Starting pitcher &middot; expected</div>',
+                    unsafe_allow_html=True)
+        st.markdown(store.html_pitcher_table(pit_df), unsafe_allow_html=True)
     starters = side_df[(side_df["role"] == "bat") & (side_df["is_bench"] == False)].sort_values("slot")  # noqa: E712
     bench = side_df[(side_df["role"] == "bat") & (side_df["is_bench"] == True)]  # noqa: E712
-    st.caption("Lineup (expected per game)")
-    st.dataframe(store.format_batter_table(starters), hide_index=True,
-                 use_container_width=True)
+    st.markdown('<div class="dv-eyebrow">Lineup &middot; expected per game</div>',
+                unsafe_allow_html=True)
+    st.markdown(store.html_batter_table(starters), unsafe_allow_html=True)
     if not bench.empty:
-        st.caption(f"Bench ({len(bench)}) — expected per game if he starts")
-        st.dataframe(store.format_batter_table(bench), hide_index=True,
-                     use_container_width=True)
+        st.markdown(f'<div class="dv-eyebrow">Bench ({len(bench)}) &middot; '
+                    'expected if he starts</div>', unsafe_allow_html=True)
+        st.markdown(store.html_batter_table(bench), unsafe_allow_html=True)
 
 
 # ── Try the generated predictions first ──────────────────────────────────────

@@ -252,9 +252,14 @@ def _game_environment(slate: list[dict], history: pd.DataFrame) -> dict:
     for g in slate:
         v = vmap.get(g.get("venue_id"))
         rec = {"temp_f": np.nan, "wind_out": np.nan, "roof_closed": np.nan,
-               "hp_ump": None}
+               "carry_index": np.nan, "hp_ump": None}
         if v is not None:
             roof = (v.get("roofType") or "Open")
+            elev = v.get("elevation")
+            indoor_ci = (float(F.indoor_carry_index(elev)[0])
+                         if elev is not None and elev == elev else np.nan)
+            share = float(closed_share.get(g.get("venue_id"), 0.0))
+            outdoor_ci = np.nan
             if roof == "Dome":
                 rec.update(temp_f=72.0, wind_out=0.0, roof_closed=1.0)
             else:
@@ -263,7 +268,7 @@ def _game_environment(slate: list[dict], history: pd.DataFrame) -> dict:
                 hour_key = (g.get("gameDate") or "")[:13] + ":00"
                 got = fc.get(hour_key)
                 if got:
-                    temp, ws, wd = got
+                    temp, ws, wd, rh, press = got
                     az = v.get("azimuth")
                     if az is not None and ws is not None and wd is not None:
                         import math
@@ -271,13 +276,15 @@ def _game_environment(slate: list[dict], history: pd.DataFrame) -> dict:
                         rec["wind_out"] = ws * math.cos(
                             math.radians(blow_to - az))
                     rec["temp_f"] = temp
+                    outdoor_ci = float(F.air_carry_index(temp, rh, press)[0])
                 if roof == "Retractable":
-                    share = float(closed_share.get(g.get("venue_id"), 0.5))
                     rec["roof_closed"] = share
                     if rec["wind_out"] == rec["wind_out"]:  # not NaN
                         rec["wind_out"] *= (1.0 - share)
                 else:
                     rec["roof_closed"] = 0.0
+            # Same parity-shared blend as the training table build.
+            rec["carry_index"] = F.blend_carry(roof, indoor_ci, outdoor_ci, share)
         rec["hp_ump"] = (fetch.get_gumbo_hp_umpire(g["gamePk"])
                          or _crew_rotation_hp(g))
         env[g["gamePk"]] = rec
@@ -334,7 +341,7 @@ def main(argv):
     for frame in (bat_t, pit_t):
         if frame.empty:
             continue
-        for col in ("temp_f", "wind_out", "roof_closed", "hp_ump"):
+        for col in ("temp_f", "wind_out", "roof_closed", "carry_index", "hp_ump"):
             frame[col] = frame["gamePk"].map(
                 lambda pk, c=col: (env.get(pk) or {}).get(c))
 

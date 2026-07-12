@@ -172,6 +172,18 @@ FEATURE_BLOCKS = {
     # -2.27%/-0.79%, p_K -0.09%. Same fatigue/injury family as velo_trend.
     "relspin_pit": {"cols": ["spin_drop", "rel_drift"],
                     "targets": {"p_outs", "p_BF", "p_pitches", "p_K"}},
+    # Round-7 candidate blocks: air-density batted-ball carry (elevation +
+    # temp + humidity + pressure), the altitude-aware physical version of the
+    # temperature feature. Pre-registered targets: carry-sensitive extra
+    # bases for batters, fly-ball damage for pitchers.
+    "airdensity_bat": {"cols": ["env_carry"], "targets": set()},
+    "airdensity_pit": {"cols": ["env_carry"], "targets": set()},
+    # Park-demeaned carry anomaly: the ONLY carry component orthogonal to the
+    # Y-1 park HR factor (design review). Tested SEPARATELY so the gauntlet
+    # gives a clean raw-vs-anomaly verdict. b3 dropped (thin air REDUCES
+    # triples -- would-be gap triples become HRs). Tight target sets.
+    "carryanom_bat": {"cols": ["env_carry_anom"], "targets": set()},
+    "carryanom_pit": {"cols": ["env_carry_anom"], "targets": set()},
 }
 
 
