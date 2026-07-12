@@ -69,13 +69,13 @@ def _badge(status: str) -> str:
     return f'<span class="dv-badge {status}">{label}</span>'
 
 
-def _bat_table(df, pbn):
-    return (store.html_expandable_batter_table(df, pbn) if pbn
+def _bat_table(df, pbn, abp):
+    return (store.html_expandable_batter_table(df, pbn or {}, abp) if (pbn or abp)
             else store.html_batter_table(df))
 
 
 def _render_side(side_df: pd.DataFrame, team_name: str, probable: str | None,
-                 status: str, pbn: dict):
+                 status: str, pbn: dict, abp: dict):
     sp = f"SP: <b>{probable}</b>" if probable else "SP: TBD"
     st.markdown(
         f'<div class="dv-team"><span class="dv-team-name">{team_name}</span>'
@@ -85,18 +85,18 @@ def _render_side(side_df: pd.DataFrame, team_name: str, probable: str | None,
     if not pit_df.empty:
         st.markdown('<div class="dv-eyebrow">Starting pitcher &middot; expected</div>',
                     unsafe_allow_html=True)
-        tbl = (store.html_expandable_pitcher_table(pit_df, pbn) if pbn
-               else store.html_pitcher_table(pit_df))
+        tbl = (store.html_expandable_pitcher_table(pit_df, pbn or {}, abp)
+               if (pbn or abp) else store.html_pitcher_table(pit_df))
         st.markdown(tbl, unsafe_allow_html=True)
     starters = side_df[(side_df["role"] == "bat") & (side_df["is_bench"] == False)].sort_values("slot")  # noqa: E712
     bench = side_df[(side_df["role"] == "bat") & (side_df["is_bench"] == True)]  # noqa: E712
     st.markdown('<div class="dv-eyebrow">Lineup &middot; expected per game</div>',
                 unsafe_allow_html=True)
-    st.markdown(_bat_table(starters, pbn), unsafe_allow_html=True)
+    st.markdown(_bat_table(starters, pbn, abp), unsafe_allow_html=True)
     if not bench.empty:
         st.markdown(f'<div class="dv-eyebrow">Bench ({len(bench)}) &middot; '
                     'expected if he starts</div>', unsafe_allow_html=True)
-        st.markdown(_bat_table(bench, pbn), unsafe_allow_html=True)
+        st.markdown(_bat_table(bench, pbn, abp), unsafe_allow_html=True)
 
 
 def _render_market_section(gp: pd.DataFrame, date: str) -> None:
@@ -136,9 +136,20 @@ if has_numbers and meta:
         pbn = props_ui.props_by_name(gp, date)
     except Exception:  # noqa: BLE001
         pbn = {}
-    if pbn:
-        st.caption("Players with a teal count have posted PrizePicks lines; "
-                   "click the row to see them.")
+    # Actuals once the game is scored (keyed by personId), so each played
+    # player's row opens to projected-vs-actual and each prop shows its result.
+    abp: dict = {}
+    day_act = store.load_actuals(date)
+    if day_act is not None:
+        ga = day_act[day_act["gamePk"] == game_pk_int]
+        abp = {int(r["personId"]): r for _, r in ga.iterrows() if pd.notna(r["personId"])}
+    if pbn or abp:
+        st.caption(
+            ("Final: click a player to see projected vs actual"
+             + (" and how the posted lines landed" if pbn else "") + "."
+             ) if abp else
+            "Players with a teal count have posted PrizePicks lines; click the "
+            "row to see them.")
     # Stack the two teams full-width so every predicted column is readable
     # (side-by-side would squeeze the 17-column batter tables).
     tinfo = m.get("teams", {})
@@ -146,7 +157,7 @@ if has_numbers and meta:
         side_df = gp[gp["isHome"] == is_home]
         t = tinfo.get(key, {})
         _render_side(side_df, t.get("abbr", SENTINEL), t.get("probable"),
-                     t.get("lineup_status", "projected"), pbn)
+                     t.get("lineup_status", "projected"), pbn, abp)
         st.divider()
     try:
         _render_market_section(gp, date)

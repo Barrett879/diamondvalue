@@ -196,6 +196,51 @@ def test_clear_lines(tmp_path, monkeypatch):
     props.clear_lines("2026-07-12")   # idempotent, no crash
 
 
+def test_compare_computes_actual_from_gamelogs():
+    preds = pd.DataFrame([
+        {"fullName": "Ketel Marte", "role": "bat", "personId": 1, "gamePk": 10,
+         "TB": 2.0, "H": 1.1, "HR": .25, "SO": .8, "BB": .35, "R": .6, "RBI": .5,
+         "b1": .6, "b2": .2, "b3": .01, "SB": .06},
+        {"fullName": "Zac Gallen", "role": "pit", "personId": 2, "gamePk": 10,
+         "K": 6.0, "H": 5.5, "BB": 1.6, "Pitches": 92.0, "ER": 2.8, "IP": 5.6},
+    ])
+    actuals = pd.DataFrame([
+        {"personId": 1, "gamePk": 10, "TB": 3, "H": 2, "HR": 1, "SO": 1, "BB": 0,
+         "R": 1, "RBI": 2, "b1": 1, "b2": 1, "b3": 0, "SB": 0},
+        {"personId": 2, "gamePk": 10, "p_K": 8, "p_H": 4, "p_BB": 1,
+         "p_pitches": 95, "p_ER": 2, "p_outs": 18},
+    ])
+    lines = pd.DataFrame([
+        {"name": "Ketel Marte", "stat_type": "Total Bases", "line": 1.5},
+        {"name": "Zac Gallen", "stat_type": "Pitcher Strikeouts", "line": 7.5},
+        {"name": "Zac Gallen", "stat_type": "Pitching Outs", "line": 16.5},
+    ])
+    by = {r["Stat"]: r for _, r in props.compare(lines, preds, actuals=actuals)[0].iterrows()}
+    assert by["Total Bases"]["Actual"] == 3.0     # gamelog TB
+    assert by["Pitcher K"]["Actual"] == 8.0        # gamelog p_K
+    assert by["Outs"]["Actual"] == 18.0            # p_outs = 3 * (p_outs/3), outs line
+    # Without actuals the column is present but None.
+    assert props.compare(lines, preds)[0].iloc[0].get("Actual") is None
+
+
+def test_props_actual_verdict():
+    from mlblib import store
+    hit = store._props_actual({"Line": 1.5, "Lean": "Over", "Actual": 3})
+    assert "hit" in hit and "model right" in hit and "went over" in hit
+    miss = store._props_actual({"Line": 1.5, "Lean": "Over", "Actual": 1})
+    assert "miss" in miss and "model off" in miss and "went under" in miss
+    assert store._props_actual({"Line": 1.5, "Lean": "Over", "Actual": None}) == ""
+
+
+def test_repair_names_resolves_leaked_id(monkeypatch):
+    from mlblib import store
+    monkeypatch.setattr(store, "_uni_name_map", lambda: {682818: "Yohendrick Pinango"})
+    df = pd.DataFrame([{"fullName": "682818", "personId": 682818},
+                       {"fullName": "Real Name", "personId": 1}])
+    out = store._repair_names(df)
+    assert out["fullName"].tolist() == ["Yohendrick Pinango", "Real Name"]
+
+
 def _bat(game, name, **over):
     row = {"gamePk": game, "fullName": name, "role": "bat", "TB": 2.0, "H": 1.0,
            "HR": 0.3, "R": 0.6, "RBI": 0.5, "BB": 0.3, "SO": 0.8, "SB": 0.1,

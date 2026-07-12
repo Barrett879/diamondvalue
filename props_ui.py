@@ -112,13 +112,14 @@ def props_by_name(scope_preds: pd.DataFrame, date_iso: str) -> dict:
     lines = props.load_lines(date_iso)
     if lines is None or lines.empty:
         return {}
-    table, _ = props.compare(lines, scope_preds)
+    table, _ = props.compare(lines, scope_preds, actuals=store.load_actuals(date_iso))
     out: dict = {}
     for _, r in table.iterrows():
         out.setdefault(r["Player"], []).append(
             {"Stat": r["Stat"], "Model": r["Model"], "Line": r["Line"],
              "Edge": r["Edge"], "Lean": r["Lean"],
-             "Direction": r.get("Direction", ""), "OddsType": r.get("OddsType", "")})
+             "Direction": r.get("Direction", ""), "OddsType": r.get("OddsType", ""),
+             "Actual": r.get("Actual")})
     return out
 
 
@@ -187,7 +188,7 @@ def render_board(scope_preds: pd.DataFrame, date_iso: str,
         # The per-line direction / odds ride on the expandable player rows, not
         # this compact ledger; drop them so the table stays Player..Lean wide.
         ledger = table[[c for c in table.columns
-                        if c not in ("Direction", "OddsType")]]
+                        if c not in ("Direction", "OddsType", "Actual")]]
         st.markdown(store.html_df(ledger, label_cols=3, hero=("Edge",)),
                     unsafe_allow_html=True)
     saved = props.saved_at_et(lines.attrs.get("saved_at"))

@@ -539,6 +539,28 @@ COMMON_CSS = """
         background: rgba(31, 159, 95, 0.12); border-color: rgba(31, 159, 95, 0.30); }
     .dv-pxwarn { margin-top: 0.14rem; font-size: 0.7rem; color: var(--fg-5);
         font-style: italic; }
+    /* Result line under a posted line once the game is final: what happened and
+       whether the model's lean was right. Informational, not a wager outcome. */
+    .dv-pactual { margin-top: 0.16rem; font-size: 0.72rem; font-weight: 600; }
+    .dv-pactual b { font-weight: 700; }
+    .dv-pactual.hit  { color: var(--value-good); }
+    .dv-pactual.miss { color: var(--fg-4); }
+    .dv-pactual.push { color: var(--fg-5); }
+    /* Projected -> actual grid for a finished player's game. */
+    .dv-agrid { margin: 0.15rem 0 0.4rem; }
+    .dv-ag-h { font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--fg-5); margin-bottom: 0.32rem; }
+    .dv-ag { display: inline-flex; align-items: baseline; gap: 0.3rem;
+        font-size: 0.74rem; color: var(--fg-3); padding: 0.14rem 0.5rem;
+        margin: 0 0.32rem 0.32rem 0; border-radius: 8px; background: var(--hairline);
+        font-variant-numeric: tabular-nums; }
+    .dv-ag i { font-style: normal; font-weight: 700; color: var(--fg-5);
+        font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    .dv-ag b { font-weight: 700; color: var(--fg-1); }
+    /* Results-only expandable marker (a player with actuals but no props). */
+    .xcaret.fin { display: inline-block; width: 0.5rem; height: 0.5rem;
+        border-radius: 50%; background: var(--accent-teal); opacity: 0.55; }
+    .dv-xrow[open] .xcaret.fin { opacity: 1; }
 
     /* Model-vs-board edge strip (Game page PrizePicks section). Teal = model
        over the line, amber = under -- direction only, NOT a bet win/loss. */

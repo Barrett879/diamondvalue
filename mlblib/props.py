@@ -350,18 +350,53 @@ def saved_at_et(iso: str | None) -> str:
         return ""
 
 
-def compare(lines: pd.DataFrame, preds: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+# Prediction column -> (gamelog actual column, gamelog-to-prediction divisor).
+# actual, in the LINE's units, = stat_scale * sum(gamelog[col] / divisor). Only
+# IP differs: the gamelog stores outs (p_outs = IP * 3), so divisor 3 recovers
+# innings before the stat_scale (1 for innings props, 3 for outs props) applies.
+_ACTUAL_BAT = {c: (c, 1.0) for c in
+               ("PA", "H", "HR", "b1", "b2", "b3", "SO", "BB", "TB", "R", "RBI", "SB")}
+_ACTUAL_PIT = {"K": ("p_K", 1.0), "BB": ("p_BB", 1.0), "H": ("p_H", 1.0),
+               "ER": ("p_ER", 1.0), "IP": ("p_outs", 3.0), "Pitches": ("p_pitches", 1.0)}
+
+
+def _actual_for(cols, scale, role, arow) -> float | None:
+    """The prop's ACTUAL value in the line's units, from a gamelog row, or None
+    if the player has no scored result or a column is unmapped."""
+    amap = _ACTUAL_BAT if role == "bat" else _ACTUAL_PIT
+    try:
+        total = 0.0
+        for c in cols:
+            gcol, div = amap[c]
+            v = arow[gcol]
+            if v != v:   # NaN -> did not play / not scored
+                return None
+            total += float(v) / div
+        return round(scale * total, 2)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def compare(lines: pd.DataFrame, preds: pd.DataFrame,
+            actuals: pd.DataFrame | None = None) -> tuple[pd.DataFrame, dict]:
     """Join posted lines to our projections and compute the model-vs-line gap.
 
     Returns (table, meta). table columns: Player, Team, Stat, Model, Line,
-    Edge (model - line), Lean (Over/Under), _abs. meta reports matched /
-    unmatched counts. Sorted by the size of the disagreement.
+    Edge (model - line), Lean (Over/Under), Direction, OddsType, Actual, _abs.
+    `actuals` (per-game gamelog counts keyed by personId+gamePk) adds the ACTUAL
+    result once a game is final; it stays None before then. meta reports matched
+    / unmatched counts. Sorted by the size of the disagreement.
     """
     if lines is None or lines.empty or preds is None or preds.empty:
         return pd.DataFrame(), {"matched": 0, "unmatched": 0, "unmapped": 0}
     by_name: dict[str, list] = {}
     for _, r in preds.iterrows():
         by_name.setdefault(normalize_name(r["fullName"]), []).append(r)
+
+    act_lookup: dict = {}
+    if actuals is not None and not actuals.empty:
+        for _, ar in actuals.iterrows():
+            act_lookup[(ar.get("personId"), ar.get("gamePk"))] = ar
 
     out, unmatched, unmapped = [], 0, 0
     for _, ln in lines.iterrows():
@@ -390,6 +425,8 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame) -> tuple[pd.DataFrame, dic
         model = scale * float(sum(float(row[c]) for c in cols))
         line = float(line)
         edge = model - line
+        arow = act_lookup.get((row.get("personId"), row.get("gamePk")))
+        actual = _actual_for(cols, scale, row["role"], arow) if arow is not None else None
         out.append({
             "Player": row["fullName"],
             "Team": ln.get("team") or "",
@@ -400,6 +437,7 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame) -> tuple[pd.DataFrame, dic
             "Lean": "Over" if edge > 0 else ("Under" if edge < 0 else "Even"),
             "Direction": ln.get("direction") or "",
             "OddsType": ln.get("odds_type") or "",
+            "Actual": actual,
             "_abs": abs(edge),
         })
     table = pd.DataFrame(out)

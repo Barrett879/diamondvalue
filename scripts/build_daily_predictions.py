@@ -132,6 +132,9 @@ def _slate_catchers(g, history) -> dict:
 def build_targets(slate, history, uni):
     bat_map = dict(zip(uni["personId"], uni["batSide"]))
     hand_map = dict(zip(uni["personId"], uni["pitchHand"]))
+    # Universe name fallback: a projected-lineup player can be off the current
+    # roster fetch (traded/optioned), which used to leave a raw id as the name.
+    uni_name = dict(zip(uni["personId"], uni["fullName"]))
     bat_rows, pit_rows, slate_meta = [], [], []
     for g in slate:
         gmeta = {"gamePk": g["gamePk"], "gameDate": g["gameDate"],
@@ -152,7 +155,8 @@ def build_targets(slate, history, uni):
                 proj = _projected_lineup(history, team["id"], g["officialDate"])
                 name_map = {r["id"]: r["name"]
                             for r in fetch.get_roster(team["id"], date=g["officialDate"])}
-                lineup = [(pid, slot, name_map.get(pid, str(pid))) for pid, slot in proj]
+                lineup = [(pid, slot, name_map.get(pid) or uni_name.get(pid) or str(pid))
+                          for pid, slot in proj]
             lineup_ids = {pid for pid, _, _ in lineup}
             for pid, slot, name in lineup:
                 bat_rows.append(_bat_target(pid, name, team["id"], slot, is_home, g, opp,
