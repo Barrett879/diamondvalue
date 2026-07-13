@@ -192,7 +192,8 @@ COMMON_CSS = """
     }
 
     /* Clear the fixed nav bar */
-    .block-container { padding-top: 3.6rem; max-width: 1180px; }
+    .block-container { padding-top: 3.6rem; max-width: 1360px;
+        padding-left: 2.5rem !important; padding-right: 2.5rem !important; }
     /* Collapse the empty spacer rows Streamlit leaves around injected <style>
        blocks (the CSS still applies from a display:none subtree). */
     .stElementContainer:has([data-testid="stMarkdownContainer"] > style:only-child) {
