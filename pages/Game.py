@@ -69,34 +69,35 @@ def _badge(status: str) -> str:
     return f'<span class="dv-badge {status}">{label}</span>'
 
 
-def _bat_table(df, pbn, abp):
-    return (store.html_expandable_batter_table(df, pbn or {}, abp) if (pbn or abp)
-            else store.html_batter_table(df))
+def _bat_table(df, pbn, abp, team):
+    return (store.html_expandable_batter_table(df, pbn or {}, abp, team) if (pbn or abp)
+            else store.html_batter_table(df, team))
 
 
 def _render_side(side_df: pd.DataFrame, team_name: str, probable: str | None,
-                 status: str, pbn: dict, abp: dict):
+                 status: str, pbn: dict, abp: dict, team_color: str):
     sp = f"SP: <b>{probable}</b>" if probable else "SP: TBD"
     st.markdown(
-        f'<div class="dv-team"><span class="dv-team-name">{team_name}</span>'
+        f'<div class="dv-team" style="--team:{team_color}">'
+        f'<span class="dv-team-name">{team_name}</span>'
         f'<span class="dv-team-sp">{sp}</span>{_badge(status)}</div>',
         unsafe_allow_html=True)
     pit_df = side_df[side_df["role"] == "pit"]
     if not pit_df.empty:
         st.markdown('<div class="dv-eyebrow">Starting pitcher &middot; expected</div>',
                     unsafe_allow_html=True)
-        tbl = (store.html_expandable_pitcher_table(pit_df, pbn or {}, abp)
-               if (pbn or abp) else store.html_pitcher_table(pit_df))
+        tbl = (store.html_expandable_pitcher_table(pit_df, pbn or {}, abp, team_color)
+               if (pbn or abp) else store.html_pitcher_table(pit_df, team_color))
         st.markdown(tbl, unsafe_allow_html=True)
     starters = side_df[(side_df["role"] == "bat") & (side_df["is_bench"] == False)].sort_values("slot")  # noqa: E712
     bench = side_df[(side_df["role"] == "bat") & (side_df["is_bench"] == True)]  # noqa: E712
     st.markdown('<div class="dv-eyebrow">Lineup &middot; expected per game</div>',
                 unsafe_allow_html=True)
-    st.markdown(_bat_table(starters, pbn, abp), unsafe_allow_html=True)
+    st.markdown(_bat_table(starters, pbn, abp, team_color), unsafe_allow_html=True)
     if not bench.empty:
         st.markdown(f'<div class="dv-eyebrow">Bench ({len(bench)}) &middot; '
                     'expected if he starts</div>', unsafe_allow_html=True)
-        st.markdown(_bat_table(bench, pbn, abp), unsafe_allow_html=True)
+        st.markdown(_bat_table(bench, pbn, abp, team_color), unsafe_allow_html=True)
 
 
 def _render_market_section(gp: pd.DataFrame, date: str) -> None:
@@ -186,8 +187,9 @@ if has_numbers and meta:
     for is_home, key in ((False, "away"), (True, "home")):
         side_df = gp[gp["isHome"] == is_home]
         t = tinfo.get(key, {})
+        tcol, _ = team_color(t.get("abbr", SENTINEL))
         _render_side(side_df, t.get("abbr", SENTINEL), t.get("probable"),
-                     t.get("lineup_status", "projected"), pbn, abp)
+                     t.get("lineup_status", "projected"), pbn, abp, tcol)
         st.divider()
     try:
         _render_market_section(gp, date)

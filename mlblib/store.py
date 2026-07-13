@@ -157,8 +157,17 @@ def _headshot(pid) -> str:
     return f'<img class="dv-hs" src="{url}" alt="">'
 
 
+def _wrap(inner: str, team: str | None) -> str:
+    """The rounded table container, optionally tinted with a team color (a thin
+    top edge + faintly team-tinted header, via the --team custom property)."""
+    cls = "dv-table-wrap teamed" if team else "dv-table-wrap"
+    style = f' style="--team:{team}"' if team else ""
+    return f'<div class="{cls}"{style}>{inner}</div>'
+
+
 def html_stat_table(str_df: pd.DataFrame, label_cols: int = 1,
-                    hero: tuple = (), pids: list | None = None) -> str:
+                    hero: tuple = (), pids: list | None = None,
+                    team: str | None = None) -> str:
     """Render a formatted string table as a themed, responsive HTML table.
     The first `label_cols` columns are left-aligned text (slot/name); the rest
     are right-aligned tabular numbers. `hero` column headers get a subtle
@@ -183,33 +192,32 @@ def html_stat_table(str_df: pd.DataFrame, label_cols: int = 1,
                 val = _headshot(pids[ri]) + val
             cells.append(f'<td class="{cls}">{val}</td>')
         body.append(f"<tr>{''.join(cells)}</tr>")
-    return (
-        '<div class="dv-table-wrap"><table class="dv-table">'
-        f'<thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody>'
-        "</table></div>"
-    )
+    return _wrap(
+        '<table class="dv-table">'
+        f'<thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody></table>',
+        team)
 
 
 def _pids_of(df: pd.DataFrame) -> list | None:
     return df["personId"].tolist() if "personId" in df.columns else None
 
 
-def html_batter_table(df: pd.DataFrame) -> str:
+def html_batter_table(df: pd.DataFrame, team: str | None = None) -> str:
     return html_stat_table(format_batter_table(df), label_cols=2, hero=("HR", "TB"),
-                           pids=_pids_of(df))
+                           pids=_pids_of(df), team=team)
 
 
-def html_pitcher_table(df: pd.DataFrame) -> str:
+def html_pitcher_table(df: pd.DataFrame, team: str | None = None) -> str:
     return html_stat_table(format_pitcher_table(df), label_cols=1, hero=("K",),
-                           pids=_pids_of(df))
+                           pids=_pids_of(df), team=team)
 
 
 # ── Expandable stat tables (each player's row opens to their PrizePicks lines) ─
 def _col_template(n_cols: int, label_cols: int) -> str:
     """CSS grid template matching the stat columns, plus a trailing caret col."""
-    if label_cols >= 2:
-        return f"2.6rem minmax(5rem, 1.7fr) repeat({n_cols - 2}, 1fr) 1.6rem"
-    return f"minmax(6rem, 1.7fr) repeat({n_cols - 1}, 1fr) 1.6rem"
+    if label_cols >= 2:  # wider name col so a headshot + full name both fit
+        return f"2.6rem minmax(6.5rem, 2.3fr) repeat({n_cols - 2}, 1fr) 1.6rem"
+    return f"minmax(8rem, 2.3fr) repeat({n_cols - 1}, 1fr) 1.6rem"
 
 
 _DIR_LABEL = {"both": "More &amp; Less", "more": "More only", "less": "Less only"}
@@ -316,7 +324,8 @@ def html_expandable_stat_table(str_df: pd.DataFrame, label_cols: int,
                                raw_df: pd.DataFrame | None = None,
                                actuals_by_pid: dict | None = None,
                                display: list | None = None,
-                               act_map: dict | None = None) -> str:
+                               act_map: dict | None = None,
+                               team: str | None = None) -> str:
     """Like html_stat_table, but a player becomes a <details> that opens to
     their PrizePicks lines and/or, once their game is final, a projected-vs-
     actual grid. Players with neither stay plain rows. Native <details> = no JS.
@@ -362,23 +371,25 @@ def html_expandable_stat_table(str_df: pd.DataFrame, label_cols: int,
         else:
             cells.append('<span class="xcaret"></span>')
             rows.append(f'<div class="dv-xrow norow">{"".join(cells)}</div>')
-    return (f'<div class="dv-table-wrap"><div class="dv-xtable" '
-            f'style="--xt:{tmpl}"><div class="dv-xhead">{head}</div>'
-            f'{"".join(rows)}</div></div>')
+    inner = (f'<div class="dv-xtable" style="--xt:{tmpl}">'
+             f'<div class="dv-xhead">{head}</div>{"".join(rows)}</div>')
+    return _wrap(inner, team)
 
 
 def html_expandable_batter_table(df: pd.DataFrame, props_by_name: dict,
-                                 actuals_by_pid: dict | None = None) -> str:
+                                 actuals_by_pid: dict | None = None,
+                                 team: str | None = None) -> str:
     return html_expandable_stat_table(
-        format_batter_table(df), 2, ("HR", "TB"), props_by_name,
-        raw_df=df, actuals_by_pid=actuals_by_pid, display=BAT_DISPLAY, act_map=_ACT_BAT)
+        format_batter_table(df), 2, ("HR", "TB"), props_by_name, raw_df=df,
+        actuals_by_pid=actuals_by_pid, display=BAT_DISPLAY, act_map=_ACT_BAT, team=team)
 
 
 def html_expandable_pitcher_table(df: pd.DataFrame, props_by_name: dict,
-                                  actuals_by_pid: dict | None = None) -> str:
+                                  actuals_by_pid: dict | None = None,
+                                  team: str | None = None) -> str:
     return html_expandable_stat_table(
-        format_pitcher_table(df), 1, ("K",), props_by_name,
-        raw_df=df, actuals_by_pid=actuals_by_pid, display=PIT_DISPLAY, act_map=_ACT_PIT)
+        format_pitcher_table(df), 1, ("K",), props_by_name, raw_df=df,
+        actuals_by_pid=actuals_by_pid, display=PIT_DISPLAY, act_map=_ACT_PIT, team=team)
 
 
 def html_df(df: pd.DataFrame, label_cols: int = 1, hero: tuple = (),

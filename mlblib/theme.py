@@ -658,6 +658,20 @@ COMMON_CSS = """
         white-space: nowrap; border-bottom: 1px solid var(--panel-line);
     }
     .dv-table thead th.l { text-align: left; }
+    /* Team-tinted stat tables: a thin team-color top edge + a faintly team-
+       tinted header row. Chrome only -- the numbers stay neutral for
+       legibility. color-mix + --rail-lift lifts dark navies off the near-black
+       background; a plain fallback ships first. */
+    .dv-table-wrap.teamed { border-top-width: 3px; border-top-color: var(--team); }
+    @supports (color: color-mix(in srgb, red, white)) {
+        .dv-table-wrap.teamed {
+            border-top-color: color-mix(in srgb, var(--team), #fff var(--rail-lift));
+        }
+        .dv-table-wrap.teamed .dv-table thead th,
+        .dv-table-wrap.teamed .dv-xhead {
+            background: color-mix(in srgb, var(--team) 7%, var(--panel-2));
+        }
+    }
     .dv-table tbody td {
         padding: 0.5rem 0.75rem; text-align: right; color: var(--fg-3);
         border-bottom: 1px solid var(--hairline-soft); white-space: nowrap;
