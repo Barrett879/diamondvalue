@@ -141,12 +141,29 @@ def _esc(s) -> str:
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
+def _headshot(pid) -> str:
+    """MLB headshot <img> for a personId. The generic-default URL never 404s
+    (an unknown id returns a silhouette), so no onerror is needed. Empty string
+    when no id."""
+    if pid is None or (isinstance(pid, float) and pid != pid):
+        return ""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return ""
+    url = ("https://img.mlbstatic.com/mlb-photos/image/upload/"
+           "d_people:generic:headshot:67:current.png/w_96,q_auto:best/"
+           f"v1/people/{pid}/headshot/67/current")
+    return f'<img class="dv-hs" src="{url}" alt="" loading="lazy">'
+
+
 def html_stat_table(str_df: pd.DataFrame, label_cols: int = 1,
-                    hero: tuple = ()) -> str:
+                    hero: tuple = (), pids: list | None = None) -> str:
     """Render a formatted string table as a themed, responsive HTML table.
     The first `label_cols` columns are left-aligned text (slot/name); the rest
     are right-aligned tabular numbers. `hero` column headers get a subtle
-    emphasis so the eye lands on the marquee stat.
+    emphasis so the eye lands on the marquee stat. `pids` (personId per row, in
+    str_df order) prepends a headshot to the name cell.
     """
     cols = list(str_df.columns)
     head = "".join(
@@ -154,14 +171,17 @@ def html_stat_table(str_df: pd.DataFrame, label_cols: int = 1,
         for i, c in enumerate(cols))
     name_idx = label_cols - 1   # the last label column is the player/pitcher name
     body = []
-    for _, r in str_df.iterrows():
+    for ri, (_, r) in enumerate(str_df.iterrows()):
         cells = []
         for i, c in enumerate(cols):
             if i < label_cols:
                 cls = "name l" if i == name_idx else "slot l"
             else:
                 cls = "hero" if c in hero else ""
-            cells.append(f'<td class="{cls}">{_esc(r[c])}</td>')
+            val = _esc(r[c])
+            if i == name_idx and pids is not None and ri < len(pids):
+                val = _headshot(pids[ri]) + val
+            cells.append(f'<td class="{cls}">{val}</td>')
         body.append(f"<tr>{''.join(cells)}</tr>")
     return (
         '<div class="dv-table-wrap"><table class="dv-table">'
@@ -170,12 +190,18 @@ def html_stat_table(str_df: pd.DataFrame, label_cols: int = 1,
     )
 
 
+def _pids_of(df: pd.DataFrame) -> list | None:
+    return df["personId"].tolist() if "personId" in df.columns else None
+
+
 def html_batter_table(df: pd.DataFrame) -> str:
-    return html_stat_table(format_batter_table(df), label_cols=2, hero=("HR", "TB"))
+    return html_stat_table(format_batter_table(df), label_cols=2, hero=("HR", "TB"),
+                           pids=_pids_of(df))
 
 
 def html_pitcher_table(df: pd.DataFrame) -> str:
-    return html_stat_table(format_pitcher_table(df), label_cols=1, hero=("K",))
+    return html_stat_table(format_pitcher_table(df), label_cols=1, hero=("K",),
+                           pids=_pids_of(df))
 
 
 # ── Expandable stat tables (each player's row opens to their PrizePicks lines) ─
@@ -217,7 +243,7 @@ def _props_actual(p: dict) -> str:
     player actually did vs the line and whether the model's lean was right.
     Informational results, never a wager outcome."""
     a = p.get("Actual")
-    if a is None:
+    if a is None or (isinstance(a, float) and a != a):  # None or NaN: did not play
         return ""
     line, actual = float(p["Line"]), float(a)
     went = "over" if actual > line else ("under" if actual < line else "push")
@@ -305,13 +331,17 @@ def html_expandable_stat_table(str_df: pd.DataFrame, label_cols: int,
     raw = raw_df.reset_index(drop=True) if raw_df is not None else None
     rows = []
     for i, (_, r) in enumerate(str_df.iterrows()):
+        row_pid = raw.iloc[i].get("personId") if (raw is not None and i < len(raw)) else None
         cells = []
         for j, c in enumerate(cols):
             if j < label_cols:
                 cls = "name l" if j == name_idx else "slot l"
             else:
                 cls = "hero" if c in hero else ""
-            cells.append(f'<span class="{cls}">{_esc(r[c])}</span>')
+            val = _esc(r[c])
+            if j == name_idx and row_pid is not None:
+                val = _headshot(row_pid) + val
+            cells.append(f'<span class="{cls}">{val}</span>')
         props = props_by_name.get(str(r[name_col]))
         actual_row = None
         if raw is not None and i < len(raw) and actuals_by_pid:

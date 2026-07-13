@@ -232,6 +232,32 @@ def test_props_actual_verdict():
     assert store._props_actual({"Line": 1.5, "Lean": "Over", "Actual": None}) == ""
 
 
+def test_props_actual_handles_dnp_nan():
+    """A final game where one lined player played and another was scratched:
+    compare's mixed [float, None] Actual column coerces to NaN, and NaN must
+    read as 'did not play', not a push with a 'nan' value."""
+    from mlblib import store
+    assert store._props_actual({"Line": 1.5, "Lean": "Over",
+                                "Actual": float("nan")}) == ""
+    preds = pd.DataFrame([
+        {"fullName": "Played Guy", "role": "bat", "personId": 1, "gamePk": 10,
+         "TB": 2.0, "H": 1.0, "HR": .2, "SO": .8, "BB": .3, "R": .6, "RBI": .5,
+         "b1": .6, "b2": .2, "b3": .0, "SB": .1},
+        {"fullName": "Scratched Guy", "role": "bat", "personId": 9, "gamePk": 10,
+         "TB": 1.5, "H": .9, "HR": .1, "SO": .7, "BB": .3, "R": .5, "RBI": .4,
+         "b1": .5, "b2": .2, "b3": .0, "SB": .1},
+    ])
+    actuals = pd.DataFrame([   # only the player who played is scored
+        {"personId": 1, "gamePk": 10, "TB": 3, "H": 2, "HR": 1, "SO": 1, "BB": 0,
+         "R": 1, "RBI": 2, "b1": 1, "b2": 1, "b3": 0, "SB": 0}])
+    lines = pd.DataFrame([
+        {"name": "Played Guy", "stat_type": "Total Bases", "line": 1.5},
+        {"name": "Scratched Guy", "stat_type": "Total Bases", "line": 1.5}])
+    by = {r["Player"]: r for _, r in props.compare(lines, preds, actuals=actuals)[0].iterrows()}
+    assert by["Played Guy"]["Actual"] == 3.0
+    assert store._props_actual(dict(by["Scratched Guy"])) == ""   # no 'nan · push'
+
+
 def test_repair_names_resolves_leaked_id(monkeypatch):
     from mlblib import store
     monkeypatch.setattr(store, "_uni_name_map", lambda: {682818: "Yohendrick Pinango"})

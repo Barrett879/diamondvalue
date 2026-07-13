@@ -493,6 +493,11 @@ COMMON_CSS = """
     .dv-xhead span, .dv-xrow span { text-align: right; white-space: nowrap;
         overflow: hidden; text-overflow: ellipsis; }
     .dv-xhead .l, .dv-xrow .l { text-align: left; }
+    /* Player headshot in the name cell (both the plain and expandable tables).
+       Sits at the left so a long name still truncates to its right. */
+    .dv-hs { width: 1.5rem; height: 1.5rem; border-radius: 50%;
+        object-fit: cover; vertical-align: middle; margin-right: 0.45rem;
+        background: var(--hairline); flex: none; }
     .dv-xrow { border-bottom: 1px solid var(--hairline-soft); }
     .dv-xtable > .dv-xrow:last-child { border-bottom: none; }
     .dv-xrow span.name { color: var(--fg-1); font-weight: 600; }

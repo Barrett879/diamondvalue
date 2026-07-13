@@ -393,10 +393,18 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame,
     for _, r in preds.iterrows():
         by_name.setdefault(normalize_name(r["fullName"]), []).append(r)
 
+    def _key(pid, gpk):
+        try:
+            return (int(pid), int(gpk))   # normalize dtype so the join can't
+        except (TypeError, ValueError):   # silently miss on int-vs-float parquets
+            return None
+
     act_lookup: dict = {}
     if actuals is not None and not actuals.empty:
         for _, ar in actuals.iterrows():
-            act_lookup[(ar.get("personId"), ar.get("gamePk"))] = ar
+            k = _key(ar.get("personId"), ar.get("gamePk"))
+            if k is not None:
+                act_lookup[k] = ar
 
     out, unmatched, unmapped = [], 0, 0
     for _, ln in lines.iterrows():
@@ -425,7 +433,7 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame,
         model = scale * float(sum(float(row[c]) for c in cols))
         line = float(line)
         edge = model - line
-        arow = act_lookup.get((row.get("personId"), row.get("gamePk")))
+        arow = act_lookup.get(_key(row.get("personId"), row.get("gamePk")))
         actual = _actual_for(cols, scale, row["role"], arow) if arow is not None else None
         out.append({
             "Player": row["fullName"],
