@@ -13,7 +13,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import props_ui  # noqa: E402
-from mlblib import fetch, store  # noqa: E402
+from mlblib import fetch, parse, store  # noqa: E402
 from mlblib.teams import team_color  # noqa: E402
 from mlblib.theme import (  # noqa: E402
     SENTINEL,
@@ -138,18 +138,48 @@ if has_numbers and meta:
         pbn = {}
     # Actuals once the game is scored (keyed by personId), so each played
     # player's row opens to projected-vs-actual and each prop shows its result.
+    def _abp_from(frame):
+        ga = frame[frame["gamePk"] == game_pk_int]
+        return {int(r["personId"]): r for _, r in ga.iterrows() if pd.notna(r["personId"])}
+
     abp: dict = {}
     day_act = store.load_actuals(date)
     if day_act is not None:
-        ga = day_act[day_act["gamePk"] == game_pk_int]
-        abp = {int(r["personId"]): r for _, r in ga.iterrows() if pd.notna(r["personId"])}
-    if pbn or abp:
-        st.caption(
-            ("Final: click a player to see projected vs actual"
-             + (" and how the posted lines landed" if pbn else "") + "."
-             ) if abp else
-            "Players with a teal count have posted PrizePicks lines; click the "
-            "row to see them.")
+        abp = _abp_from(day_act)
+    # Live fallback: a game finishes before the daily bot scores it, so let the
+    # user pull the box score on demand (cached in session_state per game).
+    _lk = f"live_actuals_{game_pk_int}"
+    if not abp and _lk in st.session_state:
+        abp = _abp_from(st.session_state[_lk])
+    if not abp:
+        c_btn, c_cap = st.columns([1, 3.2], vertical_alignment="center")
+        with c_btn:
+            if st.button("Update actuals", key="upd_act", use_container_width=True,
+                         help="Pull this game's live box score"):
+                with st.spinner("Fetching the box score..."):
+                    bs = fetch.get_boxscore_raw(game_pk_int, force=True)
+                    rows = parse.parse_boxscore(bs, {
+                        "gamePk": game_pk_int, "officialDate": date,
+                        "gameDate": m.get("gameDate"),
+                        "gameNumber": m.get("gameNumber", 1),
+                        "venue_id": m.get("venue_id"), "dayNight": None}) if bs else []
+                la = pd.DataFrame([r for r in rows if r.get("played")])
+                if la.empty:
+                    st.info("No box-score data yet. Once the game is final, "
+                            "click Update actuals again.")
+                else:
+                    st.session_state[_lk] = la
+                    st.rerun()
+        with c_cap:
+            st.caption("Once the game is final, pull the box score to see each "
+                       "player's projected vs actual"
+                       + (" and how the posted lines landed" if pbn else "") + ".")
+    if abp:
+        st.caption("Click a player to see projected vs actual"
+                   + (" and how the posted lines landed" if pbn else "") + ".")
+    elif pbn:
+        st.caption("Players with a teal count have posted PrizePicks lines; "
+                   "click the row to see them.")
     # Stack the two teams full-width so every predicted column is readable
     # (side-by-side would squeeze the 17-column batter tables).
     tinfo = m.get("teams", {})
