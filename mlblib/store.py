@@ -154,7 +154,7 @@ def _headshot(pid) -> str:
     url = ("https://img.mlbstatic.com/mlb-photos/image/upload/"
            "d_people:generic:headshot:67:current.png/w_96,q_auto:best/"
            f"v1/people/{pid}/headshot/67/current")
-    return f'<img class="dv-hs" src="{url}" alt="" loading="lazy">'
+    return f'<img class="dv-hs" src="{url}" alt="">'
 
 
 def html_stat_table(str_df: pd.DataFrame, label_cols: int = 1,
