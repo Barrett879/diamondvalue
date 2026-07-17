@@ -86,10 +86,22 @@ def normalize_name(name: str) -> str:
     return re.sub(r"\s+", " ", n).strip()
 
 
+def _person_like(name) -> bool:
+    """True when a string plausibly names a person (has a space and lowercase).
+    The feed's attributes.description is the TEAM code ("BOS"), so it must
+    never stand in for a missing player name -- a paste of a payload without
+    its included[] player list would otherwise save thousands of lines keyed
+    to team codes that can never match a player."""
+    return (isinstance(name, str) and " " in name.strip()
+            and any(c.islower() for c in name))
+
+
 def parse_prizepicks_json(raw) -> pd.DataFrame:
     """Parse the api.prizepicks.com/projections payload (dict or JSON string)
     into rows of (name, team, stat_type, line, start_time). Tolerant of the
-    JSON:API shape (data[] projections + included[] new_player)."""
+    JSON:API shape (data[] projections + included[] new_player). Props whose
+    player name cannot be resolved are skipped and counted in
+    df.attrs['skipped_noname'] so the UI can say WHY a paste yielded nothing."""
     if isinstance(raw, str):
         raw = json.loads(raw)
     data = raw.get("data", []) if isinstance(raw, dict) else []
@@ -101,14 +113,20 @@ def parse_prizepicks_json(raw) -> pd.DataFrame:
             players[str(inc.get("id"))] = (a.get("name") or a.get("display_name"),
                                            a.get("team") or a.get("team_name"))
     rows = []
+    skipped = 0
     for p in data:
         if p.get("type") != "projection":
             continue
         a = p.get("attributes", {})
         rel = (p.get("relationships", {}) or {}).get("new_player", {})
         pid = str(((rel.get("data") or {}) or {}).get("id"))
-        name, team = players.get(pid, (a.get("description"), None))
-        if not name or a.get("line_score") is None:
+        name, team = players.get(pid, (None, None))
+        if not name and _person_like(a.get("description")):
+            name = a.get("description")
+        if a.get("line_score") is None:
+            continue
+        if not name:
+            skipped += 1
             continue
         # odds_type ("standard"/"demon"/"goblin") when the feed carries it. The
         # feed does not spell out More vs Less, so we can only say "both" for a
@@ -121,18 +139,24 @@ def parse_prizepicks_json(raw) -> pd.DataFrame:
                      "start_time": a.get("start_time"),
                      "direction": "both" if odds == "standard" else "",
                      "odds_type": odds})
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    df.attrs["skipped_noname"] = skipped
+    return df
 
 
 _ODDS_TYPES = {"standard", "demon", "goblin"}
+# A bare game date or a full ISO stamp (the grabber emits the feed's whole
+# start_time so bucket_by_date can do the ET conversion here, not in JS).
+_LIST_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\S+)?$")
 
 
 def parse_line_list(text: str) -> pd.DataFrame:
     """Parse a pasted 'Name, Stat, Line' list (comma / pipe / tab separated),
-    one prop per line. Also reads the one-click grabber's 4-column rows
-    'Name | Stat | Line | odds_type' (odds_type in the last field lets the whole
-    board come in one paste with the Demon/Goblin distinction kept). A permissive
-    fallback when JSON is not to hand."""
+    one prop per line. Also reads the one-click grabber's rows
+    'Name | Stat | Line | odds_type [| YYYY-MM-DD]' (odds_type keeps the
+    Demon/Goblin distinction; the optional trailing date is the prop's GAME
+    date, so lines grabbed tonight for tomorrow's board land on tomorrow's
+    slate). A permissive fallback when JSON is not to hand."""
     rows = []
     for ln in (text or "").splitlines():
         ln = ln.strip()
@@ -144,7 +168,14 @@ def parse_line_list(text: str) -> pd.DataFrame:
             if not m:
                 continue
             parts = [m.group(1), m.group(2), m.group(3)]
-        # 4-column grabber rows carry odds_type last; otherwise the line is last.
+        # Peel an optional trailing game date/stamp first (grabber rows), so
+        # the odds/line logic below sees the same shape either way.
+        gdate = None
+        if len(parts) >= 4 and _LIST_DATE.match(parts[-1].strip()):
+            gdate = parts[-1].strip()
+            parts = parts[:-1]
+        # 4-column grabber rows carry odds_type after the line; otherwise the
+        # line is the last field.
         odds = ""
         if len(parts) >= 4 and parts[3].strip().lower() in _ODDS_TYPES:
             name, stat, line_str = parts[0], parts[1], parts[2]
@@ -158,7 +189,7 @@ def parse_line_list(text: str) -> pd.DataFrame:
         if not np.isfinite(line):   # reject nan/inf tokens at the source
             continue
         row = {"name": name.strip(), "team": None, "stat_type": stat.strip(),
-               "line": line, "start_time": None}
+               "line": line, "start_time": gdate}
         if odds:   # the feed does not spell out More vs Less; standard = both
             row["odds_type"] = odds
             row["direction"] = "both" if odds == "standard" else ""
@@ -236,17 +267,20 @@ def parse_prizepicks_board(text: str) -> pd.DataFrame:
 def parse_any(text: str) -> pd.DataFrame:
     """Parse pasted lines in whatever shape they arrive: the JSON feed, the
     copied board page, or a simple 'Name, Stat, Line' list. Returns the first
-    parser that yields rows."""
+    parser that yields rows. A JSON paste that parsed but yielded no usable
+    props (e.g. a payload with no player names) is returned as-is, empty with
+    its diagnostic attrs -- falling through to the text parsers would shred
+    the JSON into junk rows."""
     t = (text or "").strip()
     if not t:
         return pd.DataFrame()
     if t[:1] in "{[":
         try:
             df = parse_prizepicks_json(t)
-            if df is not None and not df.empty:
-                return df
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:  # noqa: BLE001 -- not valid JSON; try the text parsers
+            df = None
+        if df is not None and (not df.empty or df.attrs.get("skipped_noname")):
+            return df
     df = parse_prizepicks_board(t)
     if df is not None and not df.empty:
         return df
@@ -299,13 +333,37 @@ def load_lines(date: str) -> pd.DataFrame | None:
     return df
 
 
+def _dedup_batch(df: pd.DataFrame) -> pd.DataFrame:
+    """One line per (player, stat) within a single frame. The feed posts a
+    LADDER of alt lines for the same prop (a Demon at 8.5, another at 7.5, a
+    Goblin at 5.5...), so a full-board paste has many rows per key: prefer the
+    standard line (the two-sided market number), then Goblin, then Demon;
+    among equals keep the first (the feed's rank order)."""
+    if df is None or df.empty:
+        return df
+    keyed = df.assign(_k=(df["name"].map(normalize_name) + "|"
+                          + df["stat_type"].astype(str).str.strip().str.lower()))
+    if "odds_type" in df.columns:
+        # Unknown odds types rank WORST (3): a future PrizePicks alt-line kind
+        # must never shadow the posted standard line.
+        pref = (df["odds_type"].fillna("").astype(str).str.lower()
+                .map({"standard": 0, "": 0, "goblin": 1, "demon": 2}).fillna(3))
+        keyed = (keyed.assign(_p=pref)
+                 .sort_values("_p", kind="stable").drop(columns="_p"))
+    return (keyed.drop_duplicates("_k", keep="first").drop(columns="_k")
+            .reset_index(drop=True))
+
+
 def merge_lines(existing: pd.DataFrame | None,
                 new: pd.DataFrame | None) -> pd.DataFrame:
     """Union two line frames, deduped by (normalized name, stat_type), keeping
     the NEWEST value for a repeated prop. Lets a user paste one PrizePicks stat
     tab at a time and accumulate the whole board (there is no All tab), while a
-    re-paste of the same tab just refreshes those lines instead of piling up."""
-    frames = [f for f in (existing, new) if f is not None and not f.empty]
+    re-paste of the same tab just refreshes those lines instead of piling up.
+    Each input is ladder-deduped first, so a first-ever full-board paste does
+    not save thousands of alt lines."""
+    frames = [_dedup_batch(f) for f in (existing, new)
+              if f is not None and not f.empty]
     if not frames:
         return pd.DataFrame()
     if len(frames) == 1:
@@ -320,6 +378,32 @@ def merge_lines(existing: pd.DataFrame | None,
     return both.reset_index(drop=True)
 
 
+def bucket_by_date(lines: pd.DataFrame | None) -> dict:
+    """Split parsed lines by the ET calendar date of each prop's start_time:
+    {'YYYY-MM-DD': frame, ..., '': frame-with-unknown-dates}. The pre-game
+    board posted tonight is TOMORROW's games, so lines must be saved under the
+    date they are FOR, not the slate date on screen when they were pasted."""
+    if lines is None or lines.empty or "start_time" not in lines.columns:
+        return {"": lines if lines is not None else pd.DataFrame()}
+
+    def _et_date(stamp) -> str:
+        if not isinstance(stamp, str) or not stamp:
+            return ""
+        try:
+            dt = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        except ValueError:
+            m = re.match(r"^\d{4}-\d{2}-\d{2}", stamp)
+            return m.group(0) if m else ""
+        if dt.tzinfo is not None and _ET is not None:
+            dt = dt.astimezone(_ET)
+        return dt.date().isoformat()
+
+    out = {}
+    for d, grp in lines.groupby(lines["start_time"].map(_et_date)):
+        out[str(d)] = grp.reset_index(drop=True)
+    return out
+
+
 def clear_lines(date: str) -> None:
     """Delete the accumulated lines for `date` (the 'Clear all' control)."""
     p = lines_path(date)
@@ -328,6 +412,31 @@ def clear_lines(date: str) -> None:
             p.unlink()
     except Exception:  # noqa: BLE001
         pass
+
+
+_LINES_FILE = re.compile(r"^pp_lines_(\d{4})_(\d{2})_(\d{2})_v1\.json$")
+
+
+def saved_line_dates() -> list[tuple[str, int]]:
+    """[(date_iso, n_lines)] for EVERY date with saved lines, sorted by date.
+    Disk is the truth here, deliberately not session state: date-routed pastes
+    can land lines on several dates, and the UI must keep pointing at all of
+    them (and 'Clear all' must clear all of them) regardless of what happened
+    to this session's widgets since."""
+    out = []
+    try:
+        paths = sorted(cache.CACHE_DIR.glob("pp_lines_*_v1.json"))
+    except Exception:  # noqa: BLE001
+        return []
+    for p in paths:
+        m = _LINES_FILE.match(p.name)
+        if not m:
+            continue
+        d = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+        df = load_lines(d)
+        if df is not None and not df.empty:
+            out.append((d, len(df)))
+    return out
 
 
 def saved_at_et(iso: str | None) -> str:
@@ -407,11 +516,15 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame,
                 act_lookup[k] = ar
 
     out, unmatched, unmapped = [], 0, 0
+    unmatched_names: list[str] = []
     for _, ln in lines.iterrows():
         key = normalize_name(ln["name"])
         cands = by_name.get(key)
         if not cands:
             unmatched += 1
+            n = str(ln["name"])
+            if len(unmatched_names) < 3 and n not in unmatched_names:
+                unmatched_names.append(n)
             continue
         stat = str(ln.get("stat_type") or "").strip().lower()
         picked = None
@@ -452,4 +565,4 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame,
     if not table.empty:
         table = table.sort_values("_abs", ascending=False).drop(columns="_abs")
     return table, {"matched": len(table), "unmatched": unmatched,
-                   "unmapped": unmapped}
+                   "unmapped": unmapped, "unmatched_names": unmatched_names}

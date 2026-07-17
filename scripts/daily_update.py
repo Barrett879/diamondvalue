@@ -73,6 +73,19 @@ def main(argv: list[str]) -> None:
     except SystemExit:
         logger.warning("no predictions to score for %s", yesterday)
 
+    # Tomorrow's slate too (best-effort): the PrizePicks pre-game board goes up
+    # the evening before, so the evening run must publish tomorrow's projections
+    # for the props comparison to have something to join against. Safe pre-day:
+    # lineups fall back to projected, and the gamelog appender only takes Final
+    # games. The next morning's run regenerates it with fresher data.
+    tomorrow = today + dt.timedelta(days=1)
+    try:
+        bdp.main([tomorrow.isoformat()])
+    except SystemExit as e:
+        logger.warning("tomorrow (%s) not generated: %s", tomorrow, e)
+    except Exception as e:  # noqa: BLE001 -- never fail the daily run over it
+        logger.warning("tomorrow (%s) generation failed: %s", tomorrow, e)
+
     prune_old_predictions(today)
     logger.warning("daily update complete")
 

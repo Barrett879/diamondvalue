@@ -9,18 +9,30 @@ An informational model-vs-market view, never a wager recommendation.
 """
 from __future__ import annotations
 
+import datetime as _dt
+
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
 import scripts.fetch_prizepicks as fp
 from mlblib import props, store
+from mlblib.util import today_iso
+
+
+def _fmt_date(date_iso: str) -> str:
+    """'2026-07-17' -> 'Thu Jul 17' (falls back to the raw string)."""
+    try:
+        return _dt.date.fromisoformat(date_iso).strftime("%a %b %-d")
+    except ValueError:
+        return date_iso
 
 # One-click grabber: runs in the user's OWN logged-in browser (where PrizePicks
 # is not Cloudflare-blocked). It resolves MLB's league id from /leagues (the
 # numeric id is NOT stable -- a hardcoded league_id returned 0 lines), auto-pages
-# through every projection (Name | Stat | Line | odds_type so the Demon/Goblin
-# distinction survives), then pops up a small box with the lines pre-selected.
+# through every projection (Name | Stat | Line | odds_type | game date, so the
+# Demon/Goblin distinction survives and tonight's grab of TOMORROW's board lands
+# on tomorrow's slate), then pops up a small box with the lines pre-selected.
 # The user presses Cmd+C (or clicks Copy) and pastes. IMPORTANT: it does NOT
 # auto-copy after the fetch -- awaiting the network consumes the click's user
 # activation, so navigator.clipboard.writeText then throws NotAllowedError in
@@ -46,7 +58,8 @@ BOOKMARKLET = (
     "forEach(d=>{let a=d.attributes||{},rel=d.relationships||{},xd=((rel."
     "new_player||rel.player||{}).data)||{},m=n[xd.id];if(m&&a.line_score!="
     "null&&a.stat_type)o.push(m+' | '+a.stat_type+' | '+a.line_score+' | '+"
-    "(a.odds_type||'standard'))})}if(!o.length){alert('Grabbed 0 lines. "
+    "(a.odds_type||'standard')+' | '+(a.start_time||''))})}"
+    "if(!o.length){alert('Grabbed 0 lines. "
     "Debug: '+dbg+'. Copy this text and send it to DiamondValue.');return}"
     "let s=o.join(String.fromCharCode(10));let ov=document."
     "createElement('div');ov.style.cssText='position:fixed;inset:0;z-index:"
@@ -83,10 +96,22 @@ def resolve_and_persist(date_iso: str):
     board, or list) -- MERGED into the previously-saved set and persisted, so
     every page/game reads the same accumulating board. PrizePicks has no All
     tab, so each paste ADDS to what is saved (a re-paste of the same tab just
-    refreshes those lines). Returns the merged frame or None. Safe to call at
-    the top of a page before the input widgets render (it reads their committed
-    session_state values). 'Clear all' (clear_lines) resets the set."""
+    refreshes those lines).
+
+    Lines are saved under the date of the GAME they are for (from each prop's
+    start_time), not the slate date on screen: the pre-game board posted
+    tonight is tomorrow's games, and saving it under today would strand it
+    against the wrong slate. Lines with no start_time (board-text pastes, bare
+    lists) stay on the on-screen date. render_input reads the per-date state
+    back from DISK (props.saved_line_dates), so its pointers survive reruns
+    and later pastes; only the no-player-names diagnostic rides session state
+    (st.session_state['pp_parse_note']).
+
+    Returns the saved frame for `date_iso` (or None). Safe to call at the top
+    of a page before the input widgets render (it reads their committed
+    session_state values). 'Clear all' (_clear_lines) resets the set."""
     lines = None
+    note = ""
     payload = st.session_state.get("pp_payload") or fp.load_raw(date_iso)
     if payload:
         try:
@@ -97,12 +122,20 @@ def resolve_and_persist(date_iso: str):
         txt = (st.session_state.get("pp_paste") or "").strip()
         if txt:
             got = props.parse_any(txt)   # JSON, board text, or a simple list
+            if got is not None and got.empty and got.attrs.get("skipped_noname"):
+                note = (f"That JSON has {got.attrs['skipped_noname']} props but "
+                        "no player names (its player list is missing), so "
+                        "nothing could be saved. Use the grabber above -- it "
+                        "resolves the names -- or re-open the feed link and "
+                        "copy the whole page.")
             lines = got if (got is not None and not got.empty) else None
     if lines is not None and not lines.empty:
-        merged = props.merge_lines(props.load_lines(date_iso), lines)
-        props.save_lines(date_iso, merged)   # accumulate across stat tabs
-        return merged
-    return props.load_lines(date_iso)       # fall back to a prior save
+        for d, batch in props.bucket_by_date(lines).items():
+            dest = d or date_iso
+            merged = props.merge_lines(props.load_lines(dest), batch)
+            props.save_lines(dest, merged)   # accumulate across stat tabs
+    st.session_state["pp_parse_note"] = note
+    return props.load_lines(date_iso)        # what THIS page's date has saved
 
 
 def props_by_name(scope_preds: pd.DataFrame, date_iso: str) -> dict:
@@ -149,17 +182,35 @@ def line_counts_by_game(scope_preds: pd.DataFrame, date_iso: str) -> dict:
 
 
 def render_board(scope_preds: pd.DataFrame, date_iso: str,
-                 scope_label: str = "this game", show_ledger: bool = True) -> int:
+                 scope_label: str = "this game", show_ledger: bool = True,
+                 warn_on_empty: bool = False) -> int:
     """Strip of the biggest gaps over the full model-vs-line ledger, for the
     given predictions frame (one game, or the whole slate). Both rank by
     ABSOLUTE gap so the leading chip is the ledger's top row. Renders nothing
     (returns 0) when no lines are stored or none of these players have a
-    posted, mappable line."""
+    posted, mappable line -- except with warn_on_empty (the slate-wide call),
+    where saved-but-matchless lines get an explanation instead of silence:
+    a board that says nothing after "6,000 lines saved" reads as broken."""
     lines = props.load_lines(date_iso)
     if lines is None or lines.empty:
         return 0
     table, meta = props.compare(lines, scope_preds)
     if table.empty:
+        if warn_on_empty:
+            samples = meta.get("unmatched_names") or []
+            if samples and all(s.isupper() and len(s) <= 4 for s in samples):
+                hint = (" They have team codes instead of player names (a feed "
+                        "paste missing its player list) -- click Clear all and "
+                        "re-add them with the grabber.")
+            elif samples:
+                hint = (" None matched a player on this slate; unmatched "
+                        f"examples: {', '.join(samples)}.")
+            else:
+                hint = (" They name players on this slate but none map to a "
+                        "projected stat.")
+            n = len(lines)
+            st.warning(f"{n} PrizePicks line{'s' if n != 1 else ''} saved for "
+                       f"{date_iso} could not be compared.{hint}")
         return 0
     n = meta["matched"]
     st.success(f"{n} PrizePicks line{'s' if n != 1 else ''} loaded and compared "
@@ -208,16 +259,28 @@ def render_board(scope_preds: pd.DataFrame, date_iso: str,
 
 
 def _clear_lines(date_iso: str) -> None:
-    """'Clear all' button callback: drop every accumulated line for the date and
-    reset the input state. Runs before the rerun, so clearing pp_paste here also
-    stops resolve_and_persist from re-merging the last paste back in."""
+    """'Clear all' button callback: drop every saved line on EVERY date (a
+    date-routed paste can live on several), delete any cached raw feed pull
+    (resolve_and_persist re-reads it each run, so leaving it would resurrect
+    the lines on the very next rerun and make Clear all a visible no-op), and
+    reset the input state. Runs before the rerun, so clearing pp_paste here
+    also stops resolve_and_persist from re-merging the last paste back in."""
     props.clear_lines(date_iso)
+    for d, _n in props.saved_line_dates():
+        props.clear_lines(d)
+    try:
+        for p in props.cache.CACHE_DIR.glob("prizepicks_raw_*.json"):
+            p.unlink(missing_ok=True)
+    except OSError:
+        pass
     st.session_state["pp_paste"] = ""
     st.session_state["pp_payload"] = None
 
 
+# No single_stat filter: combo props (H+R+RBI) are projected too, and the
+# ladder of Demon/Goblin alt lines is collapsed to one line per prop at merge.
 FEED_URL = ("https://api.prizepicks.com/projections?"
-            "league_id=2&per_page=250&single_stat=true")
+            "league_id=2&per_page=250")
 
 
 def render_input(date_iso: str) -> None:
@@ -300,9 +363,16 @@ def render_input(date_iso: str) -> None:
                      "Paste the grabber/feed output here, or type a simple list:\n"
                      "Ketel Marte, Total Bases, 1.5\n"
                      "Zac Gallen, Pitcher Strikeouts, 6.5"))
-    # The paste is already merged into the saved set by resolve_and_persist at
-    # the top of the page, so n_saved here is the running total.
+    # The paste is already merged into the saved set(s) by resolve_and_persist
+    # at the top of the page. Per-date state comes from DISK, not session
+    # state: a date-routed paste can live on several dates, and these pointers
+    # (and Clear all's reach) must survive later pastes and reruns.
     n_saved = saved_count(date_iso)
+    all_saved = props.saved_line_dates()
+    # Pointers only for live dates (today on): a stale save from last week is
+    # noise, though Clear all still reaches every date.
+    elsewhere = {d: n for d, n in all_saved
+                 if d != date_iso and d >= today_iso()}
     c_add, c_clear = st.columns([2.4, 1], gap="small")
     with c_add:
         compared = st.button("Add these lines", type="primary", key="pp_compare",
@@ -310,19 +380,29 @@ def render_input(date_iso: str) -> None:
     with c_clear:
         st.button("Clear all", key="pp_clear", on_click=_clear_lines,
                   args=(date_iso,), use_container_width=True,
-                  disabled=n_saved == 0,
-                  help="Remove every line you have added for this date")
+                  disabled=n_saved == 0 and not all_saved,
+                  help="Remove every saved line, on this and every other date")
     st.caption("The grabber gets everything in one click. A manual paste ADDS to "
                "your lines (re-pasting refreshes, no duplicates), so you can also "
                "paste stat tabs one at a time. Skip Fantasy Score, 1st-Inning and "
                "Combo props, those are not projected. Lines apply to every game.")
+    # The no-player-names diagnostic must never be drowned out by older saved
+    # lines reading as success -- that silence is the original bug.
+    note = st.session_state.get("pp_parse_note")
+    if note:
+        st.warning(note)
+    n_total = n_saved + sum(elsewhere.values())
     if compared:
-        st.toast(f"{n_saved} PrizePicks line(s) loaded." if n_saved
-                 else "Couldn't read any lines from that paste.")
+        st.toast(("The last paste saved nothing. " if note else "")
+                 + (f"{n_total} PrizePicks line(s) on file." if n_total
+                    else "Couldn't read any lines from that paste."))
     if n_saved:
-        st.success(f"{n_saved} PrizePicks line(s) loaded. They show above and on "
-                   "every game page.")
-    elif (st.session_state.get("pp_paste") or "").strip():
+        st.success(f"{n_saved} PrizePicks line(s) loaded for this slate. They "
+                   "show above and on every game page.")
+    for d, n in sorted(elsewhere.items())[:3]:
+        st.info(f"{n} line(s) are saved for games on **{_fmt_date(d)}**. Step "
+                "the date there to see their board.")
+    if not n_total and not note and (st.session_state.get("pp_paste") or "").strip():
         st.warning("Couldn't read any lines from that paste. Paste the grabber "
                    "output, the PrizePicks board or feed JSON, or a simple "
                    "`Name, Stat, Line` list.")

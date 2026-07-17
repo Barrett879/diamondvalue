@@ -234,7 +234,8 @@ st.caption("Pitcher strikeouts are the most predictable per-game stat. Batter "
 # joins in once they exist. Input expands when nothing is saved yet. ──────────
 st.markdown('<div class="dv-bar-rule"></div>', unsafe_allow_html=True)
 if _has_preds:
-    props_ui.render_board(_preds_full, date_iso, scope_label="the slate")
+    props_ui.render_board(_preds_full, date_iso, scope_label="the slate",
+                          warn_on_empty=True)
 else:
     props_ui.resolve_and_persist(date_iso)   # persist a paste even pre-projections
     _n_saved = props_ui.saved_count(date_iso)

@@ -324,6 +324,116 @@ def test_parse_json_and_list():
     assert len(lst) == 2 and lst.iloc[1]["line"] == 6.0
 
 
+def test_parse_json_rejects_team_code_description():
+    """A projections payload pasted WITHOUT its included[] player list must not
+    save lines named after team codes: the feed's attributes.description is the
+    TEAM ("BOS"), and 6,000 of those can never match a player."""
+    import json as _json
+    proj = {"type": "projection", "attributes": {
+        "stat_type": "Pitcher Strikeouts", "line_score": 8.5,
+        "description": "BOS", "start_time": "2026-07-17T13:35:00.000-04:00"},
+        "relationships": {"new_player": {"data": {"id": "260848"}}}}
+    df = props.parse_prizepicks_json({"data": [proj]})
+    assert df.empty and df.attrs["skipped_noname"] == 1
+    # A person-like description still works as a last-resort name.
+    named = dict(proj, attributes=dict(proj["attributes"], description="James Wood"))
+    df2 = props.parse_prizepicks_json({"data": [named]})
+    assert len(df2) == 1 and df2.iloc[0]["name"] == "James Wood"
+    # parse_any must return the empty-but-diagnosed frame for JSON input, not
+    # fall through and shred the JSON text into junk rows.
+    any_df = props.parse_any(_json.dumps({"data": [proj]}))
+    assert any_df.empty and any_df.attrs.get("skipped_noname") == 1
+
+
+def test_merge_collapses_ladder_prefers_standard():
+    ladder = pd.DataFrame([
+        {"name": "Garrett Crochet", "stat_type": "Pitcher Strikeouts",
+         "line": 8.5, "odds_type": "demon", "direction": ""},
+        {"name": "Garrett Crochet", "stat_type": "Pitcher Strikeouts",
+         "line": 6.5, "odds_type": "standard", "direction": "both"},
+        {"name": "Garrett Crochet", "stat_type": "Pitcher Strikeouts",
+         "line": 5.5, "odds_type": "goblin", "direction": ""},
+    ])
+    m = props.merge_lines(None, ladder)   # first-ever paste must dedup too
+    assert len(m) == 1
+    assert m.iloc[0]["line"] == 6.5 and m.iloc[0]["odds_type"] == "standard"
+    # Demon/Goblin only (no standard posted): Goblin wins over Demon.
+    m2 = props.merge_lines(None, ladder[ladder["odds_type"] != "standard"])
+    assert len(m2) == 1 and m2.iloc[0]["odds_type"] == "goblin"
+    # No odds_type column at all: plain first-wins dedup, no crash.
+    m3 = props.merge_lines(None, pd.DataFrame([
+        {"name": "A B", "stat_type": "Hits", "line": 1.5},
+        {"name": "A B", "stat_type": "Hits", "line": 0.5}]))
+    assert len(m3) == 1 and m3.iloc[0]["line"] == 1.5
+
+
+def test_bucket_by_date_uses_et_game_date():
+    lines = pd.DataFrame([
+        {"name": "A B", "stat_type": "Hits", "line": 1.5,
+         "start_time": "2026-07-17T13:35:00.000-04:00"},   # ET afternoon
+        {"name": "C D", "stat_type": "Hits", "line": 1.5,
+         "start_time": "2026-07-18T02:10:00Z"},             # 22:10 ET on the 17th
+        {"name": "E F", "stat_type": "Hits", "line": 1.5,
+         "start_time": "2026-07-16"},                       # grabber bare date
+        {"name": "G H", "stat_type": "Hits", "line": 1.5,
+         "start_time": None},                               # board text
+    ])
+    b = props.bucket_by_date(lines)
+    assert set(b) == {"2026-07-17", "2026-07-16", ""}
+    assert len(b["2026-07-17"]) == 2       # the UTC stamp folded to ET's 17th
+    assert b[""].iloc[0]["name"] == "G H"
+    # No start_time column at all -> one unknown bucket.
+    nb = props.bucket_by_date(pd.DataFrame([{"name": "X", "stat_type": "H",
+                                             "line": 1.0}]))
+    assert set(nb) == {""} and len(nb[""]) == 1
+
+
+def test_parse_line_list_reads_grabber_game_date():
+    txt = ("James Wood | Total Bases | 4.5 | goblin | 2026-07-17\n"
+           "Casey Schmitt | Total Bases | 1.5 | standard\n"
+           # The grabber emits the feed's FULL start_time (ET conversion
+           # happens app-side in bucket_by_date, not in JS).
+           "Gerrit Cole | Pitcher Strikeouts | 5 | standard | "
+           "2026-07-17T19:05:00.000-04:00\n"
+           # A trailing date without an odds column still routes.
+           "Ketel Marte | Total Bases | 1.5 | 2026-07-18\n")
+    df = props.parse_line_list(txt)
+    by = {r["name"]: r for _, r in df.iterrows()}
+    assert by["James Wood"]["start_time"] == "2026-07-17"
+    assert by["Casey Schmitt"]["start_time"] is None
+    assert by["Gerrit Cole"]["start_time"] == "2026-07-17T19:05:00.000-04:00"
+    assert by["Gerrit Cole"]["line"] == 5.0
+    assert by["Ketel Marte"]["start_time"] == "2026-07-18"
+    assert by["Ketel Marte"]["line"] == 1.5
+
+
+def test_saved_line_dates_and_global_reach(tmp_path, monkeypatch):
+    """saved_line_dates reads per-date truth from disk (session state must not
+    be the authority: a routed paste spans dates and Clear all needs them all)."""
+    from mlblib import cache
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(props.cache, "dc_path", lambda name: tmp_path / name)
+    assert props.saved_line_dates() == []
+    props.save_lines("2026-07-16", pd.DataFrame([
+        {"name": "A B", "stat_type": "Hits", "line": 0.5}]))
+    props.save_lines("2026-07-17", pd.DataFrame([
+        {"name": "C D", "stat_type": "Hits", "line": 0.5},
+        {"name": "E F", "stat_type": "Hits", "line": 1.5}]))
+    assert props.saved_line_dates() == [("2026-07-16", 1), ("2026-07-17", 2)]
+    props.clear_lines("2026-07-16")
+    props.clear_lines("2026-07-17")
+    assert props.saved_line_dates() == []
+
+
+def test_dedup_never_lets_unknown_odds_shadow_standard():
+    df = pd.DataFrame([
+        {"name": "A B", "stat_type": "Hits", "line": 9.5, "odds_type": "big_play"},
+        {"name": "A B", "stat_type": "Hits", "line": 1.5, "odds_type": "standard"},
+    ])
+    m = props.merge_lines(None, df)
+    assert len(m) == 1 and m.iloc[0]["line"] == 1.5
+
+
 def test_parse_line_list_reads_grabber_odds_type():
     # The one-click grabber emits 4 columns: Name | Stat | Line | odds_type.
     txt = ("James Wood | Total Bases | 4.5 | goblin\n"

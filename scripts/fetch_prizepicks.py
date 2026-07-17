@@ -54,8 +54,9 @@ def fetch(date: str | None = None) -> dict | None:
     seen_inc = set()
     page, pages = 1, 1
     while page <= pages and page <= 12:
-        url = (f"{BASE}?league_id={MLB_LEAGUE_ID}&per_page=250&page={page}"
-               "&single_stat=true")
+        # No single_stat filter (parity with the grabber/FEED_URL): combo props
+        # are projected too, and alt-line ladders collapse at merge time.
+        url = f"{BASE}?league_id={MLB_LEAGUE_ID}&per_page=250&page={page}"
         try:
             req = urllib.request.Request(url, headers=HEADERS)
             with urllib.request.urlopen(req, timeout=20) as r:
