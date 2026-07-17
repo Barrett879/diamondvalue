@@ -123,6 +123,12 @@ def props_by_name(scope_preds: pd.DataFrame, date_iso: str) -> dict:
     return out
 
 
+def saved_count(date_iso: str) -> int:
+    """How many PrizePicks lines are saved for the date (0 when none)."""
+    saved = props.load_lines(date_iso)
+    return 0 if saved is None or saved.empty else len(saved)
+
+
 def line_counts_by_game(scope_preds: pd.DataFrame, date_iso: str) -> dict:
     """{gamePk: number of posted PrizePicks lines that map to a projected stat,
     summed across BOTH teams in that game}. Feeds the per-card count on the
@@ -296,8 +302,7 @@ def render_input(date_iso: str) -> None:
                      "Zac Gallen, Pitcher Strikeouts, 6.5"))
     # The paste is already merged into the saved set by resolve_and_persist at
     # the top of the page, so n_saved here is the running total.
-    saved = props.load_lines(date_iso)
-    n_saved = 0 if saved is None or saved.empty else len(saved)
+    n_saved = saved_count(date_iso)
     c_add, c_clear = st.columns([2.4, 1], gap="small")
     with c_add:
         compared = st.button("Add these lines", type="primary", key="pp_compare",

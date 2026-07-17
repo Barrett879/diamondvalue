@@ -42,6 +42,15 @@ if "slate_date" not in st.session_state:
     st.session_state["slate_date"] = (
         parse_iso_date(st.query_params.get("date")) or parse_iso_date(today_iso()))
 
+# URL hygiene: the home URL owns {date, theme}. Drop a stray gamePk carried in
+# from a game deep link, and keep ?date= matching the slate actually shown, so
+# opening or sharing this URL reproduces exactly this view.
+if "gamePk" in st.query_params:
+    del st.query_params["gamePk"]
+_cur_iso = st.session_state["slate_date"].isoformat()
+if st.query_params.get("date") != _cur_iso:
+    st.query_params["date"] = _cur_iso
+
 
 def _jump(days_delta: int):
     """Absolute jump: Yesterday/Today relative to the real current date."""
@@ -220,13 +229,21 @@ st.caption("Pitcher strikeouts are the most predictable per-game stat. Batter "
            "single-game numbers are low-signal by nature; treat every value as "
            "a distribution mean.")
 
-# ── PrizePicks: the slate-wide biggest edges surface here and on every game
-# page. Lines were already persisted above (before the card counts), so this
-# just renders. Collapsed input so it never clutters the slate. ───────────────
+# ── PrizePicks: always available. Lines persist per date even before the day's
+# projections are generated (the bot runs mid-morning); the comparison board
+# joins in once they exist. Input expands when nothing is saved yet. ──────────
+st.markdown('<div class="dv-bar-rule"></div>', unsafe_allow_html=True)
 if _has_preds:
-    st.markdown('<div class="dv-bar-rule"></div>', unsafe_allow_html=True)
     props_ui.render_board(_preds_full, date_iso, scope_label="the slate")
-    with st.expander("Add / update PrizePicks lines", expanded=False):
-        props_ui.render_input(date_iso)
+else:
+    props_ui.resolve_and_persist(date_iso)   # persist a paste even pre-projections
+    _n_saved = props_ui.saved_count(date_iso)
+    if _n_saved:
+        st.caption(f"{_n_saved} PrizePicks line(s) saved for {date_iso}. The "
+                   "model comparison appears once this date's projections are "
+                   "generated.")
+with st.expander("Add / update PrizePicks lines",
+                 expanded=props_ui.saved_count(date_iso) == 0):
+    props_ui.render_input(date_iso)
 
 render_footer()
