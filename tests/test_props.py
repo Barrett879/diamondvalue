@@ -158,6 +158,22 @@ def test_compare_carries_direction_and_flags_unoffered_side():
     assert "Under side not offered" in meta
 
 
+def test_props_meta_flags_feed_demon_under():
+    """A feed-pasted Demon carries odds_type but NO direction; its More-only
+    nature must still label the row and flag an Under lean as unplayable."""
+    from mlblib import store
+    meta = store._props_meta({"Stat": "TB", "Model": 0.9, "Line": 4.5,
+                              "Edge": -3.6, "Lean": "Under",
+                              "Direction": "", "OddsType": "demon"})
+    assert "More only" in meta and "Demon" in meta
+    assert "not offered" in meta
+    # Over on a Goblin IS the playable direction -- no warning.
+    ok = store._props_meta({"Stat": "H", "Model": 1.1, "Line": 0.5,
+                            "Edge": 0.6, "Lean": "Over",
+                            "Direction": "", "OddsType": "goblin"})
+    assert "not offered" not in ok and "More only" in ok
+
+
 def test_props_meta_no_flag_when_side_offered():
     from mlblib import store
     p = {"Stat": "TB", "Model": 2.0, "Line": 1.5, "Edge": 0.5, "Lean": "Over",

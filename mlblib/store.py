@@ -229,8 +229,15 @@ def _props_meta(p: dict) -> str:
     market does not offer. Informational market facts, not a wager prompt."""
     direction = str(p.get("Direction", "") or "")
     odds = str(p.get("OddsType", "") or "").lower()
+    # Offered sides come from the explicit board-text buttons when present,
+    # else are inferred from the odds type: Demons AND Goblins are More-only
+    # (the feed carries only odds_type, and a feed-pasted Demon must flag an
+    # Under lean as unplayable just like a board-text one).
+    from .props import _offered_sides
+    offered = _offered_sides(direction, odds)
     bits = []
-    label = _DIR_LABEL.get(direction)
+    label = (_DIR_LABEL.get(direction)
+             or (_DIR_LABEL.get(offered) if odds in ("demon", "goblin") else None))
     if label:
         bits.append(f'<span class="pd">{label}</span>')
     if odds in ("demon", "goblin"):
@@ -240,9 +247,9 @@ def _props_meta(p: dict) -> str:
     # leans a side that is not among the offered directions, flag it.
     lean = str(p.get("Lean", ""))
     model_side = "more" if lean == "Over" else "less" if lean == "Under" else ""
-    if model_side and direction in ("more", "less") and direction != model_side:
+    if model_side and offered in ("more", "less") and offered != model_side:
         meta += (f'<div class="dv-pxwarn">model&rsquo;s {_esc(lean)} side '
-                 f"not offered</div>")
+                 f"not offered &middot; nothing to act on</div>")
     return meta
 
 
