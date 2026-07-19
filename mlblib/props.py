@@ -469,6 +469,19 @@ _ACTUAL_PIT = {"K": ("p_K", 1.0), "BB": ("p_BB", 1.0), "H": ("p_H", 1.0),
                "ER": ("p_ER", 1.0), "IP": ("p_outs", 3.0), "Pitches": ("p_pitches", 1.0)}
 
 
+def _offered_sides(direction, odds_type) -> str:
+    """Which side(s) of the line can actually be taken: 'both', 'more', or
+    'less'. An explicit direction (parsed from the board's Less/More buttons)
+    wins; otherwise infer from the odds type -- PrizePicks Demons AND Goblins
+    are both More-only (Less is never offered on an alt line), standard offers
+    both sides."""
+    d = str(direction or "").strip().lower()
+    if d in ("both", "more", "less"):
+        return d
+    o = str(odds_type or "").strip().lower()
+    return "more" if o in ("demon", "goblin") else "both"
+
+
 def _actual_for(cols, scale, role, arow) -> float | None:
     """The prop's ACTUAL value in the line's units, from a gamelog row, or None
     if the player has no scored result or a column is unmapped."""
@@ -548,6 +561,13 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame,
         edge = model - line
         arow = act_lookup.get(_key(row.get("personId"), row.get("gamePk")))
         actual = _actual_for(cols, scale, row["role"], arow) if arow is not None else None
+        lean = "Over" if edge > 0 else ("Under" if edge < 0 else "Even")
+        # A lean is only actionable when that side of the line is offered:
+        # recommending Under on a More-only Demon is an impossible pick.
+        offered = _offered_sides(ln.get("direction"), ln.get("odds_type"))
+        playable = (lean == "Even" or offered == "both"
+                    or (lean == "Over" and offered == "more")
+                    or (lean == "Under" and offered == "less"))
         out.append({
             "Player": row["fullName"],
             "Team": ln.get("team") or "",
@@ -555,9 +575,10 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame,
             "Model": round(model, 2),
             "Line": round(line, 2),
             "Edge": round(edge, 2),
-            "Lean": "Over" if edge > 0 else ("Under" if edge < 0 else "Even"),
+            "Lean": lean,
             "Direction": ln.get("direction") or "",
             "OddsType": ln.get("odds_type") or "",
+            "Playable": playable,
             "Actual": actual,
             "_abs": abs(edge),
         })

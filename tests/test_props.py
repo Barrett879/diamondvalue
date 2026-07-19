@@ -425,6 +425,35 @@ def test_saved_line_dates_and_global_reach(tmp_path, monkeypatch):
     assert props.saved_line_dates() == []
 
 
+def test_compare_marks_impossible_leans_unplayable():
+    """A lean must be a side the user can actually take: Demons AND Goblins are
+    More-only on PrizePicks, and board-text lines carry the real Less/More
+    buttons. Recommending Under on a More-only line is an impossible pick."""
+    lines = pd.DataFrame([
+        # Marte model TB = 2.0: Demon alt at 4.5 leans Under -> NOT playable.
+        {"name": "Ketel Marte", "stat_type": "Total Bases", "line": 4.5,
+         "odds_type": "demon", "direction": ""},
+        # Marte model H = 1.1: Goblin at 0.5 leans Over -> More-only is fine.
+        {"name": "Ketel Marte", "stat_type": "Hits", "line": 0.5,
+         "odds_type": "goblin", "direction": ""},
+        # Gallen model K = 6.0 vs 6.5 leans Under; board says Less offered.
+        {"name": "Zac Gallen", "stat_type": "Pitcher Strikeouts", "line": 6.5,
+         "odds_type": "standard", "direction": "less"},
+        # Gallen model H = 5.5 vs 5.0 leans Over; board offers Less ONLY.
+        {"name": "Zac Gallen", "stat_type": "Hits Allowed", "line": 5.0,
+         "odds_type": "standard", "direction": "less"},
+        # No direction/odds info at all -> assume both sides, playable.
+        {"name": "Ketel Marte", "stat_type": "Home Runs", "line": 0.5},
+    ])
+    table, _ = props.compare(lines, _preds())
+    by = {(r["Player"], r["Stat"]): r for _, r in table.iterrows()}
+    assert not by[("Ketel Marte", "Total Bases")]["Playable"]
+    assert by[("Ketel Marte", "Hits")]["Playable"]
+    assert by[("Zac Gallen", "Pitcher K")]["Playable"]
+    assert not by[("Zac Gallen", "Hits Allowed")]["Playable"]
+    assert by[("Ketel Marte", "Home Runs")]["Playable"]
+
+
 def test_dedup_never_lets_unknown_odds_shadow_standard():
     df = pd.DataFrame([
         {"name": "A B", "stat_type": "Hits", "line": 9.5, "odds_type": "big_play"},

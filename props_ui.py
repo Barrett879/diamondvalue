@@ -218,7 +218,19 @@ def render_board(scope_preds: pd.DataFrame, date_iso: str,
     st.markdown('<div class="dv-eyebrow">Model vs the board &middot; '
                 'PrizePicks lines</div>', unsafe_allow_html=True)
 
-    strip = table[table["Edge"].abs() >= 0.005]
+    # Only ACTIONABLE lines make the recommendations: a Demon/Goblin the model
+    # leans Under on cannot be taken (both alt types are More-only), so it must
+    # never top the edge board. Hidden lines still show on each player's
+    # expandable row with their "side not offered" note.
+    playable = table[table["Playable"]] if "Playable" in table.columns else table
+    n_hidden = len(table) - len(playable)
+    if playable.empty:
+        st.info(f"All {len(table)} matched line(s) lean a side PrizePicks does "
+                "not offer (Demons and Goblins are More-only), so there is "
+                "nothing to act on.")
+        return n
+
+    strip = playable[playable["Edge"].abs() >= 0.005]
     chips = strip.head(6)
     if not chips.empty:
         top = float(chips["Edge"].abs().max()) or 1.0
@@ -244,12 +256,16 @@ def render_board(scope_preds: pd.DataFrame, date_iso: str,
     if show_ledger:
         # The per-line direction / odds ride on the expandable player rows, not
         # this compact ledger; drop them so the table stays Player..Lean wide.
-        ledger = table[[c for c in table.columns
-                        if c not in ("Direction", "OddsType", "Actual")]]
+        ledger = playable[[c for c in playable.columns
+                           if c not in ("Direction", "OddsType", "Playable",
+                                        "Actual")]]
         st.markdown(store.html_df(ledger, label_cols=3, hero=("Edge",)),
                     unsafe_allow_html=True)
     saved = props.saved_at_et(lines.attrs.get("saved_at"))
     note = f"{meta['matched']} posted line(s) for {scope_label}"
+    if n_hidden:
+        note += (f" · {n_hidden} hidden (model leans a side not offered; "
+                 "Demons/Goblins are More-only)")
     if saved:
         note += f" · lines saved {saved}"
     note += (" · model means vs posted lines, informational, "
@@ -284,20 +300,88 @@ FEED_URL = ("https://api.prizepicks.com/projections?"
 
 
 def render_input(date_iso: str) -> None:
-    """The line-input controls. The FAST path is the one-click grabber (copies
-    the whole board at once); a manual copy-paste and a best-effort live pull are
-    also offered. Persistence/comparison is handled by resolve_and_persist +
-    render_board; this only draws widgets."""
-    # ── Fastest: the one-click grabber (recommended). Runs in the user's own
-    #    logged-in browser and copies the WHOLE board (every stat) at once.
-    #    A bordered container, NOT an expander -- render_input is already inside
-    #    the "Add / update" expander and Streamlit forbids nesting expanders. ──
+    """The line-input controls. The PRIMARY path is pasting the feed page:
+    open one link, copy the whole wall of code, paste once -- nothing to
+    install, and date routing puts every line on its game's slate. The
+    one-click grabber bookmark and a best-effort live pull sit below it.
+    Persistence/comparison is handled by resolve_and_persist + render_board;
+    this only draws widgets."""
+    # ── Fastest: open the feed link, copy the wall of text, paste. A bordered
+    #    container, NOT an expander -- render_input is already inside the
+    #    "Add / update" expander and Streamlit forbids nesting expanders. ──
     with st.container(border=True):
-        st.markdown("**Fastest: grab the whole board in one click** (recommended)")
+        st.markdown("**Fastest: copy the feed page and paste it here** "
+                    "(recommended)")
         st.markdown(
-            "The grabber runs in your own browser (where PrizePicks is not "
-            "blocked) and copies **every line across all stat tabs** in one "
-            "click, so you paste once instead of tab by tab.<br><br>"
+            f'1. Open the <a href="{FEED_URL}" target="_blank" rel="noopener">'
+            "<b>PrizePicks feed &#8599;</b></a> in a new tab. It looks like a "
+            "huge wall of code -- that IS the whole board, and exactly what "
+            "you want.<br>"
+            "2. Select all (&#8984;A) and copy (&#8984;C).<br>"
+            "3. Come back here, paste in the box below, and click **Add these "
+            "lines**. Every line lands on the date of its own game, so "
+            "tonight's copy of tomorrow's board goes to tomorrow's slate.",
+            unsafe_allow_html=True)
+    st.caption("A stat tab copied from the PrizePicks board page, or a simple "
+               "`Name, Stat, Line` list, pastes fine too.")
+    st.text_area("Paste the grabber output, feed JSON, board text, or a "
+                 "Name, Stat, Line list", height=150, key="pp_paste",
+                 placeholder=(
+                     "Paste the grabber/feed output here, or type a simple list:\n"
+                     "Ketel Marte, Total Bases, 1.5\n"
+                     "Zac Gallen, Pitcher Strikeouts, 6.5"))
+    # The paste is already merged into the saved set(s) by resolve_and_persist
+    # at the top of the page. Per-date state comes from DISK, not session
+    # state: a date-routed paste can live on several dates, and these pointers
+    # (and Clear all's reach) must survive later pastes and reruns.
+    n_saved = saved_count(date_iso)
+    all_saved = props.saved_line_dates()
+    # Pointers only for live dates (today on): a stale save from last week is
+    # noise, though Clear all still reaches every date.
+    elsewhere = {d: n for d, n in all_saved
+                 if d != date_iso and d >= today_iso()}
+    c_add, c_clear = st.columns([2.4, 1], gap="small")
+    with c_add:
+        compared = st.button("Add these lines", type="primary", key="pp_compare",
+                             use_container_width=True)
+    with c_clear:
+        st.button("Clear all", key="pp_clear", on_click=_clear_lines,
+                  args=(date_iso,), use_container_width=True,
+                  disabled=n_saved == 0 and not all_saved,
+                  help="Remove every saved line, on this and every other date")
+    st.caption("A paste ADDS to your saved lines (re-pasting refreshes, no "
+               "duplicates), so stat tabs can also come in one at a time. "
+               "Fantasy Score, 1st-Inning and Combo props are not projected "
+               "and are skipped. Lines apply to every game on their date.")
+    # The no-player-names diagnostic must never be drowned out by older saved
+    # lines reading as success -- that silence is the original bug.
+    note = st.session_state.get("pp_parse_note")
+    if note:
+        st.warning(note)
+    n_total = n_saved + sum(elsewhere.values())
+    if compared:
+        st.toast(("The last paste saved nothing. " if note else "")
+                 + (f"{n_total} PrizePicks line(s) on file." if n_total
+                    else "Couldn't read any lines from that paste."))
+    if n_saved:
+        st.success(f"{n_saved} PrizePicks line(s) loaded for this slate. They "
+                   "show above and on every game page.")
+    for d, n in sorted(elsewhere.items())[:3]:
+        st.info(f"{n} line(s) are saved for games on **{_fmt_date(d)}**. Step "
+                "the date there to see their board.")
+    if not n_total and not note and (st.session_state.get("pp_paste") or "").strip():
+        st.warning("Couldn't read any lines from that paste. Paste the grabber "
+                   "output, the PrizePicks board or feed JSON, or a simple "
+                   "`Name, Stat, Line` list.")
+
+    # ── Alternative: the one-click grabber bookmark. Runs in the user's own
+    #    logged-in browser and copies the whole board without opening the feed
+    #    page. A bordered container, NOT an expander (no nesting). ──
+    with st.container(border=True):
+        st.markdown("**Alternative: a one-click grabber bookmark**")
+        st.markdown(
+            "A bookmark that copies every line in one click, no feed page "
+            "involved.<br><br>"
             "**Install once — Chrome (easiest):**<br>"
             "1. Show the bookmarks bar (&#8984;&#8679;B).<br>"
             "2. Drag the teal button below onto the **bookmarks bar** (not the "
@@ -307,9 +391,8 @@ def render_input(date_iso: str) -> None:
             "**Bookmarks &rsaquo; Edit Bookmarks**, and paste it into that "
             "bookmark's **Address** field.<br><br>"
             "**Each day:** open **prizepicks.com** (signed in), click the "
-            "bookmark. A small box pops up with the whole board pre-selected. "
-            "Press **&#8984;C** (or click Copy), then come back here, paste in "
-            "the box, and click **Add these lines**.",
+            "bookmark, press &#8984;C when the box pops up (already selected), "
+            "then paste into the box above.",
             unsafe_allow_html=True)
         # The <a href> holds the bookmarklet so Chrome can DRAG it to the
         # bookmarks bar; clicking instead COPIES it (Safari can't drag a
@@ -349,63 +432,6 @@ def render_input(date_iso: str) -> None:
         st.caption("Or copy this code manually and paste it as the bookmark's "
                    "Address:")
         st.code(BOOKMARKLET, language="javascript")
-
-    # ── Manual alternative: paste the feed or a stat tab from the board. ──
-    st.markdown(
-        "**Or paste manually:** open the "
-        f'<a href="{FEED_URL}" target="_blank" rel="noopener">PrizePicks feed '
-        "&#8599;</a> (or copy a stat tab from the board), select all "
-        "(&#8984;A), copy (&#8984;C), paste below, then click **Add these lines**.",
-        unsafe_allow_html=True)
-    st.text_area("Paste the grabber output, feed JSON, board text, or a "
-                 "Name, Stat, Line list", height=150, key="pp_paste",
-                 placeholder=(
-                     "Paste the grabber/feed output here, or type a simple list:\n"
-                     "Ketel Marte, Total Bases, 1.5\n"
-                     "Zac Gallen, Pitcher Strikeouts, 6.5"))
-    # The paste is already merged into the saved set(s) by resolve_and_persist
-    # at the top of the page. Per-date state comes from DISK, not session
-    # state: a date-routed paste can live on several dates, and these pointers
-    # (and Clear all's reach) must survive later pastes and reruns.
-    n_saved = saved_count(date_iso)
-    all_saved = props.saved_line_dates()
-    # Pointers only for live dates (today on): a stale save from last week is
-    # noise, though Clear all still reaches every date.
-    elsewhere = {d: n for d, n in all_saved
-                 if d != date_iso and d >= today_iso()}
-    c_add, c_clear = st.columns([2.4, 1], gap="small")
-    with c_add:
-        compared = st.button("Add these lines", type="primary", key="pp_compare",
-                             use_container_width=True)
-    with c_clear:
-        st.button("Clear all", key="pp_clear", on_click=_clear_lines,
-                  args=(date_iso,), use_container_width=True,
-                  disabled=n_saved == 0 and not all_saved,
-                  help="Remove every saved line, on this and every other date")
-    st.caption("The grabber gets everything in one click. A manual paste ADDS to "
-               "your lines (re-pasting refreshes, no duplicates), so you can also "
-               "paste stat tabs one at a time. Skip Fantasy Score, 1st-Inning and "
-               "Combo props, those are not projected. Lines apply to every game.")
-    # The no-player-names diagnostic must never be drowned out by older saved
-    # lines reading as success -- that silence is the original bug.
-    note = st.session_state.get("pp_parse_note")
-    if note:
-        st.warning(note)
-    n_total = n_saved + sum(elsewhere.values())
-    if compared:
-        st.toast(("The last paste saved nothing. " if note else "")
-                 + (f"{n_total} PrizePicks line(s) on file." if n_total
-                    else "Couldn't read any lines from that paste."))
-    if n_saved:
-        st.success(f"{n_saved} PrizePicks line(s) loaded for this slate. They "
-                   "show above and on every game page.")
-    for d, n in sorted(elsewhere.items())[:3]:
-        st.info(f"{n} line(s) are saved for games on **{_fmt_date(d)}**. Step "
-                "the date there to see their board.")
-    if not n_total and not note and (st.session_state.get("pp_paste") or "").strip():
-        st.warning("Couldn't read any lines from that paste. Paste the grabber "
-                   "output, the PrizePicks board or feed JSON, or a simple "
-                   "`Name, Stat, Line` list.")
 
     # Best-effort automated pull (usually blocked by PrizePicks; harmless).
     if st.button("Try a live pull instead", key="pp_update",
