@@ -153,22 +153,20 @@ if has_numbers and meta:
     _lk = f"live_actuals_{game_pk_int}"
     if not abp and _lk in st.session_state:
         abp = _abp_from(st.session_state[_lk])
-    # ── Header actions: both controls live up here as buttons, right under the
-    #    matchup hero, and behave exactly as they used to lower on the page.
-    #    The popover holds the same paste flow the old bottom expander did;
-    #    guarded like the market section so a deploy-swap can't crash the view.
-    c_lines, c_act, c_cap = st.columns([1.4, 1.4, 3.2], gap="small",
-                                       vertical_alignment="center")
-    with c_lines:
-        with st.popover("Update lines", use_container_width=True,
-                        help="Add or update PrizePicks lines"):
+    # ── Nav-bar actions: both controls live ON the top bar as buttons (the
+    #    dv_nav_actions container position:fixes next to the theme toggle) and
+    #    behave exactly as they used to lower on the page. The popover holds
+    #    the same paste flow the old bottom expander did; guarded like the
+    #    market section so a deploy-swap can't crash the view. The no-data
+    #    notice renders in the page flow, not inside the pinned bar cluster.
+    with st.container(key="dv_nav_actions"):
+        with st.popover("Update lines", help="Add or update PrizePicks lines"):
             try:
                 props_ui.render_input(date)
             except Exception:  # noqa: BLE001
                 st.caption("Line input is briefly unavailable (app updating).")
-    if not abp:
-        with c_act:
-            if st.button("Update actuals", key="upd_act", use_container_width=True,
+        if not abp:
+            if st.button("Update actuals", key="upd_act",
                          help="Pull this game's live box score"):
                 with st.spinner("Fetching the box score..."):
                     bs = fetch.get_boxscore_raw(game_pk_int, force=True)
@@ -179,15 +177,19 @@ if has_numbers and meta:
                         "venue_id": m.get("venue_id"), "dayNight": None}) if bs else []
                 la = pd.DataFrame([r for r in rows if r.get("played")])
                 if la.empty:
-                    st.info("No box-score data yet. Once the game is final, "
-                            "click Update actuals again.")
+                    st.session_state["_act_note"] = (
+                        "No box-score data yet. Once the game is final, click "
+                        "Update actuals (top bar) again.")
                 else:
                     st.session_state[_lk] = la
                     st.rerun()
-        with c_cap:
-            st.caption("Once the game is final, pull the box score to see each "
-                       "player's projected vs actual"
-                       + (" and how the posted lines landed" if pbn else "") + ".")
+    _note = st.session_state.pop("_act_note", None)
+    if _note:
+        st.info(_note)
+    if not abp:
+        st.caption("Once the game is final, **Update actuals** in the top bar "
+                   "pulls the box score to see each player's projected vs actual"
+                   + (" and how the posted lines landed" if pbn else "") + ".")
     if abp:
         st.caption("Click a player to see projected vs actual"
                    + (" and how the posted lines landed" if pbn else "") + ".")

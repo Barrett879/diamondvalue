@@ -265,6 +265,35 @@ COMMON_CSS = """
         border-radius: 20px !important;
     }
 
+    /* Header action cluster: Update lines (+ Update actuals on a game page)
+       pinned into the nav bar just left of the theme toggle, same pill look.
+       On narrow screens it falls back into the page flow so it can't overlap
+       the nav links. */
+    /* The keyed container IS the stVerticalBlock, so the row direction goes
+       straight on it (a child selector matches nothing). */
+    .st-key-dv_nav_actions {
+        position: fixed;
+        top: 0.35rem; right: 5.6rem;
+        z-index: 10000;
+        width: auto !important;
+        flex-direction: row !important;
+        gap: 0.4rem !important;
+    }
+    .st-key-dv_nav_actions [data-testid="stElementContainer"],
+    .st-key-dv_nav_actions [data-testid="stLayoutWrapper"] {
+        width: auto !important;
+    }
+    .st-key-dv_nav_actions button {
+        padding: 0.15rem 0.7rem !important;
+        font-size: 0.78rem !important;
+        font-weight: 600 !important;
+        border-radius: 20px !important;
+        white-space: nowrap !important;
+    }
+    @media (max-width: 900px) {
+        .st-key-dv_nav_actions { position: static; margin-top: 0.3rem; }
+    }
+
     /* Brand + hero */
     .dv-brand {
         font-family: 'Space Grotesk', sans-serif;

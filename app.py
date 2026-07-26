@@ -152,10 +152,17 @@ st.markdown(
 # popover's counts and every board below reflect this run's paste.
 props_ui.resolve_and_persist(date_iso)
 
-# ── Date control bar: chevron step / date / Yesterday / Today / line input ──
+# ── Nav-bar action: Update lines, pinned into the top bar next to the theme
+# toggle (the dv_nav_actions container position:fixes there). The popover
+# holds the exact same paste flow the old bottom expander did. ──────────────
+with st.container(key="dv_nav_actions"):
+    with st.popover("Update lines", help="Add or update PrizePicks lines"):
+        props_ui.render_input(date_iso)
+
+# ── Date control bar: chevron step / date / Yesterday / Today ───────────────
 with st.container(key="dv_datebar"):
-    c_prev, c_date, c_next, c_yday, c_today, c_lines = st.columns(
-        [0.6, 3.2, 0.6, 1.4, 1.3, 1.9], gap="small", vertical_alignment="bottom")
+    c_prev, c_date, c_next, c_yday, c_today = st.columns(
+        [0.6, 4, 0.6, 1.5, 1.4], gap="small", vertical_alignment="bottom")
     with c_prev:
         st.button("‹", key="step_prev", on_click=_step, args=(-1,),
                   use_container_width=True, help="Previous day")
@@ -170,12 +177,6 @@ with st.container(key="dv_datebar"):
     with c_today:
         st.button("Today", key="jump_today", on_click=_jump, args=(0,),
                   use_container_width=True)
-    with c_lines:
-        # The line input lives in the header as a button now; the popover
-        # holds the exact same paste flow the old bottom expander did.
-        with st.popover("Update lines", use_container_width=True,
-                        help="Add or update PrizePicks lines"):
-            props_ui.render_input(date_iso)
 st.markdown('<div class="dv-bar-rule"></div>', unsafe_allow_html=True)
 
 if not rows:
@@ -246,7 +247,7 @@ if _has_preds:
                                      scope_label="the slate", warn_on_empty=True)
     if _matched == 0 and props_ui.saved_count(date_iso) == 0:
         st.caption("No PrizePicks lines loaded for this date. Use the "
-                   "**Update lines** button next to the date picker to add them.")
+                   "**Update lines** button in the top bar to add them.")
 else:
     _n_saved = props_ui.saved_count(date_iso)
     if _n_saved:
