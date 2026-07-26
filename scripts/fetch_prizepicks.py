@@ -6,9 +6,9 @@ falls back to a pasted payload. Where the client IS allowed through (some
 networks/deployments), it pages the projections endpoint and writes the raw
 JSON:API payload to cache/prizepicks_raw_{date}.json for props.compare to read.
 
-Called on demand from the Props page's "Update now" button (never from the
-daily cron: lines move intraday and a scheduled scrape would be stale, and
-keeping the scrape off the automated path avoids hammering PrizePicks).
+CLI-only utility: the app's paste box is the only in-app source of lines
+(never from the daily cron either -- lines move intraday, and PrizePicks
+rejects VPN/datacenter IPs app-side anyway).
 
 Usage: python scripts/fetch_prizepicks.py [YYYY-MM-DD]
 """

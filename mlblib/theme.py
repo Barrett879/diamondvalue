@@ -748,12 +748,27 @@ def render_nav(current: str) -> None:
     "_self" navigates the app's own frame, which works whether the app is
     iframed (Streamlit Cloud) or served directly (local/Render).
     """
+    # DYNAMIC nav links: carry the date being viewed and the theme into every
+    # destination (each Streamlit page navigation is a fresh session, so a bare
+    # href would reset both). Every page seeds itself from ?date=/?theme=, so
+    # navigation feels continuous and the address bar is always a shareable
+    # URL of exactly the current view.
+    qs_parts = []
+    _d = st.query_params.get("date")
+    if _d:
+        qs_parts.append(f"date={_d}")
+    qs_parts.append("theme=" + ("dark" if st.session_state.get("theme_dark")
+                                else "light"))
+    qs = "?" + "&".join(qs_parts)
     home_cls = "active" if current == "Home" else ""
-    links = f'<a class="home-link {home_cls}" href="/" target="_self">DiamondValue</a>'
+    links = (f'<a class="home-link {home_cls}" href="/{qs}" '
+             'target="_self">DiamondValue</a>')
     links += '<span class="divider">|</span>'
     for label, url in _NAV_PAGES:
         cls = "active" if label == current else ""
-        links += f'<a class="{cls}" href="{url}" target="_self">{label}</a>'
+        sep = "&" if "?" in url else "?"
+        links += (f'<a class="{cls}" href="{url}{sep}{qs[1:]}" '
+                  f'target="_self">{label}</a>')
     st.markdown(f'<div class="top-nav">{links}</div>', unsafe_allow_html=True)
     # Pinned top-right toggle, on every page (the HoopsValue pattern: a keyed
     # container that COMMON_CSS position:fixes into the nav row).
