@@ -230,8 +230,9 @@ def render_input(date_iso: str) -> None:
     Open the feed link, copy the whole wall of code, paste once -- date
     routing puts every line on its game's slate. Persistence/comparison is
     handled by resolve_and_persist + render_board; this only draws widgets."""
-    # ── A bordered container, NOT an expander -- render_input is already
-    #    inside the "Add / update" expander and Streamlit forbids nesting. ──
+    # ── A bordered container, NOT an expander -- render_input renders inside
+    #    the header's "Update lines" popover, and Streamlit forbids nesting
+    #    expanders inside popovers. ──
     with st.container(border=True):
         st.markdown("**Copy the feed page and paste it here**")
         st.markdown(

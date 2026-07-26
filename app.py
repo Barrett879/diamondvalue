@@ -148,10 +148,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Date control bar: chevron step / date / Yesterday / Today ───────────────
+# Persist any freshly-pasted lines BEFORE the header controls render, so the
+# popover's counts and every board below reflect this run's paste.
+props_ui.resolve_and_persist(date_iso)
+
+# ── Date control bar: chevron step / date / Yesterday / Today / line input ──
 with st.container(key="dv_datebar"):
-    c_prev, c_date, c_next, c_yday, c_today = st.columns(
-        [0.6, 4, 0.6, 1.5, 1.4], gap="small", vertical_alignment="bottom")
+    c_prev, c_date, c_next, c_yday, c_today, c_lines = st.columns(
+        [0.6, 3.2, 0.6, 1.4, 1.3, 1.9], gap="small", vertical_alignment="bottom")
     with c_prev:
         st.button("‹", key="step_prev", on_click=_step, args=(-1,),
                   use_container_width=True, help="Previous day")
@@ -166,6 +170,12 @@ with st.container(key="dv_datebar"):
     with c_today:
         st.button("Today", key="jump_today", on_click=_jump, args=(0,),
                   use_container_width=True)
+    with c_lines:
+        # The line input lives in the header as a button now; the popover
+        # holds the exact same paste flow the old bottom expander did.
+        with st.popover("Update lines", use_container_width=True,
+                        help="Add or update PrizePicks lines"):
+            props_ui.render_input(date_iso)
 st.markdown('<div class="dv-bar-rule"></div>', unsafe_allow_html=True)
 
 if not rows:
@@ -185,14 +195,12 @@ st.markdown(
     '<span class="lg-none"><i></i>Not posted</span>'
     '</div></div>', unsafe_allow_html=True)
 
-# Load the slate's predictions once; persist any freshly-pasted lines BEFORE we
-# count them, so each card's line badge reflects the latest paste on this run.
-# line_counts maps gamePk -> posted PrizePicks lines summed across both teams.
+# Load the slate's predictions once (lines were already persisted above the
+# date bar). line_counts maps gamePk -> posted PrizePicks lines for both teams.
 _preds_full = store.load_predictions(date_iso)
 _has_preds = _preds_full is not None and not _preds_full.empty
 line_counts: dict = {}
 if _has_preds:
-    props_ui.resolve_and_persist(date_iso)
     line_counts = props_ui.line_counts_by_game(_preds_full, date_iso)
 
 _STATUS_CLS = {"lineups posted": "s-posted", "1 lineup posted": "s-partial",
@@ -229,22 +237,21 @@ st.caption("Pitcher strikeouts are the most predictable per-game stat. Batter "
            "single-game numbers are low-signal by nature; treat every value as "
            "a distribution mean.")
 
-# ── PrizePicks: always available. Lines persist per date even before the day's
-# projections are generated (the bot runs mid-morning); the comparison board
-# joins in once they exist. Input expands when nothing is saved yet. ──────────
+# ── PrizePicks: the input lives in the header (Update lines); the comparison
+# board renders here. Lines persist per date even before the day's projections
+# are generated (the bot runs mid-morning); the board joins in once they exist.
 st.markdown('<div class="dv-bar-rule"></div>', unsafe_allow_html=True)
 if _has_preds:
-    props_ui.render_board(_preds_full, date_iso, scope_label="the slate",
-                          warn_on_empty=True)
+    _matched = props_ui.render_board(_preds_full, date_iso,
+                                     scope_label="the slate", warn_on_empty=True)
+    if _matched == 0 and props_ui.saved_count(date_iso) == 0:
+        st.caption("No PrizePicks lines loaded for this date. Use the "
+                   "**Update lines** button next to the date picker to add them.")
 else:
-    props_ui.resolve_and_persist(date_iso)   # persist a paste even pre-projections
     _n_saved = props_ui.saved_count(date_iso)
     if _n_saved:
         st.caption(f"{_n_saved} PrizePicks line(s) saved for {date_iso}. The "
                    "model comparison appears once this date's projections are "
                    "generated.")
-with st.expander("Add / update PrizePicks lines",
-                 expanded=props_ui.saved_count(date_iso) == 0):
-    props_ui.render_input(date_iso)
 
 render_footer()
