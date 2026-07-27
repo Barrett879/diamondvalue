@@ -4,7 +4,9 @@ predictions have not been generated, it falls back to the posted lineups.
 """
 from __future__ import annotations
 
+import datetime as dt
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -67,6 +69,15 @@ def _hero(away: str, home: str, date: str, et: str) -> None:
 def _badge(status: str) -> str:
     label = "Lineup posted" if status == "confirmed" else "Projected lineup"
     return f'<span class="dv-badge {status}">{label}</span>'
+
+
+def _game_started(game_date_utc: str | None) -> bool:
+    """True once the scheduled first pitch has passed (UTC compare)."""
+    try:
+        s = (game_date_utc or "").replace("Z", "+00:00")
+        return dt.datetime.now(dt.timezone.utc) >= dt.datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return False
 
 
 def _bat_table(df, pbn, abp, team):
@@ -148,54 +159,65 @@ if has_numbers and meta:
     day_act = store.load_actuals(date)
     if day_act is not None:
         abp = _abp_from(day_act)
-    # Live fallback: a game finishes before the daily bot scores it, so let the
-    # user pull the box score on demand (cached in session_state per game).
+    # ── Actuals exist for EVERY game at all times: once first pitch has
+    # passed and the committed gamelogs have not scored the game yet, the live
+    # box score is pulled AUTOMATICALLY (2-minute session cache, so reruns do
+    # not refetch and an in-progress game keeps updating on its own). The
+    # Update actuals button just forces an immediate refresh. ────────────────
+    def _pull_live_actuals() -> pd.DataFrame:
+        bs = fetch.get_boxscore_raw(game_pk_int, force=True)
+        rows = parse.parse_boxscore(bs, {
+            "gamePk": game_pk_int, "officialDate": date,
+            "gameDate": m.get("gameDate"),
+            "gameNumber": m.get("gameNumber", 1),
+            "venue_id": m.get("venue_id"), "dayNight": None}) if bs else []
+        return pd.DataFrame([r for r in rows if r.get("played")])
+
     _lk = f"live_actuals_{game_pk_int}"
-    if not abp and _lk in st.session_state:
-        abp = _abp_from(st.session_state[_lk])
+    _started = _game_started(m.get("gameDate"))
+    _live_actuals = False
+    if not abp and _started:
+        entry = st.session_state.get(_lk)
+        if not (isinstance(entry, dict) and time.time() - entry["at"] < 120):
+            with st.spinner("Pulling the box score..."):
+                try:
+                    entry = {"at": time.time(), "df": _pull_live_actuals()}
+                except Exception:  # noqa: BLE001 -- a feed hiccup must not break the page
+                    entry = {"at": time.time(), "df": pd.DataFrame()}
+            st.session_state[_lk] = entry
+        if entry["df"] is not None and not entry["df"].empty:
+            abp = _abp_from(entry["df"])
+            _live_actuals = bool(abp)
     # ── Nav-bar actions: both controls live ON the top bar as buttons (the
-    #    dv_nav_actions container position:fixes next to the theme toggle) and
-    #    behave exactly as they used to lower on the page. The popover holds
-    #    the same paste flow the old bottom expander did; guarded like the
-    #    market section so a deploy-swap can't crash the view. The no-data
-    #    notice renders in the page flow, not inside the pinned bar cluster.
+    #    dv_nav_actions container position:fixes next to the theme toggle).
+    #    The popover holds the same paste flow the old bottom expander did;
+    #    guarded like the market section so a deploy-swap can't crash the view.
     with st.container(key="dv_nav_actions"):
         with st.popover("Update lines", help="Add or update PrizePicks lines"):
             try:
                 props_ui.render_input(date)
             except Exception:  # noqa: BLE001
                 st.caption("Line input is briefly unavailable (app updating).")
-        if not abp:
+        # Refresh only makes sense once the game is on and until the committed
+        # (final, scored) gamelogs take over.
+        if _started and (not abp or _live_actuals):
             if st.button("Update actuals", key="upd_act",
-                         help="Pull this game's live box score"):
-                with st.spinner("Fetching the box score..."):
-                    bs = fetch.get_boxscore_raw(game_pk_int, force=True)
-                    rows = parse.parse_boxscore(bs, {
-                        "gamePk": game_pk_int, "officialDate": date,
-                        "gameDate": m.get("gameDate"),
-                        "gameNumber": m.get("gameNumber", 1),
-                        "venue_id": m.get("venue_id"), "dayNight": None}) if bs else []
-                la = pd.DataFrame([r for r in rows if r.get("played")])
-                if la.empty:
-                    st.session_state["_act_note"] = (
-                        "No box-score data yet. Once the game is final, click "
-                        "Update actuals (top bar) again.")
-                else:
-                    st.session_state[_lk] = la
-                    st.rerun()
-    _note = st.session_state.pop("_act_note", None)
-    if _note:
-        st.info(_note)
-    if not abp:
-        st.caption("Once the game is final, **Update actuals** in the top bar "
-                   "pulls the box score to see each player's projected vs actual"
-                   + (" and how the posted lines landed" if pbn else "") + ".")
+                         help="Refresh this game's box score now"):
+                st.session_state.pop(_lk, None)
+                st.rerun()
     if abp:
-        st.caption("Click a player to see projected vs actual"
+        st.caption(("Live box score, refreshed automatically. " if _live_actuals
+                    else "")
+                   + "Click a player to see projected vs actual"
                    + (" and how the posted lines landed" if pbn else "") + ".")
-    elif pbn:
-        st.caption("Players with a teal count have posted PrizePicks lines; "
-                   "click the row to see them.")
+    else:
+        note = ("No box-score data posted yet; actuals appear here "
+                "automatically." if _started else
+                "Actuals appear here automatically once the game starts.")
+        if pbn:
+            note += (" Players with a teal count have posted PrizePicks lines; "
+                     "click the row to see them.")
+        st.caption(note)
     # Stack the two teams full-width so every predicted column is readable
     # (side-by-side would squeeze the 17-column batter tables).
     tinfo = m.get("teams", {})

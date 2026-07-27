@@ -258,12 +258,32 @@ COMMON_CSS = """
         z-index: 10000;
         width: auto !important;
     }
-    .st-key-dv_theme_toggle button {
-        padding: 0.15rem 0.7rem !important;
-        font-size: 0.78rem !important;
+    /* The whole right-side bar cluster (Update lines / Update actuals / the
+       theme toggle) wears the nav-pill look: same size and radius as the nav
+       links, quiet panel-line border, teal (the site's interaction accent)
+       on hover. Tokens flip with the theme. */
+    .st-key-dv_theme_toggle button,
+    .st-key-dv_nav_actions button {
+        padding: 0.24rem 0.85rem !important;
+        font-size: 0.82rem !important;
         font-weight: 600 !important;
+        font-family: inherit !important;
         border-radius: 20px !important;
+        background: transparent !important;
+        border: 1px solid var(--panel-line) !important;
+        color: var(--fg-2) !important;
+        white-space: nowrap !important;
+        min-height: 0 !important;
+        line-height: 1.25 !important;
+        transition: all 0.15s !important;
     }
+    .st-key-dv_theme_toggle button:hover,
+    .st-key-dv_nav_actions button:hover {
+        border-color: var(--accent-teal) !important;
+        color: var(--accent-teal) !important;
+        background: transparent !important;
+    }
+    .st-key-dv_nav_actions button svg { color: inherit !important; }
 
     /* Header action cluster: Update lines (+ Update actuals on a game page)
        pinned into the nav bar just left of the theme toggle, same pill look.
@@ -282,13 +302,6 @@ COMMON_CSS = """
     .st-key-dv_nav_actions [data-testid="stElementContainer"],
     .st-key-dv_nav_actions [data-testid="stLayoutWrapper"] {
         width: auto !important;
-    }
-    .st-key-dv_nav_actions button {
-        padding: 0.15rem 0.7rem !important;
-        font-size: 0.78rem !important;
-        font-weight: 600 !important;
-        border-radius: 20px !important;
-        white-space: nowrap !important;
     }
     @media (max-width: 900px) {
         .st-key-dv_nav_actions { position: static; margin-top: 0.3rem; }
