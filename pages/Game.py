@@ -30,8 +30,16 @@ st.set_page_config(page_title="Game · DiamondValue", page_icon="static/favicon.
 render_page_chrome()
 render_nav("")
 
+# The public host for shareable links. Minted explicitly because Streamlit
+# Community Cloud serves the app in an iframe: the browser's address bar never
+# reflects in-app navigation, so there is nothing correct to copy from it.
+SHARE_BASE = "https://diamondvalue.streamlit.app"
+
 date = st.query_params.get("date")
 game_pk = st.query_params.get("gamePk")
+away_q = (st.query_params.get("away") or "").strip().upper()
+home_q = (st.query_params.get("home") or "").strip().upper()
+gnum_q = st.query_params.get("game")   # doubleheader disambiguator (1-based)
 
 _dark = st.session_state.get("theme_dark", False)
 _theme = "dark" if _dark else "light"
@@ -39,17 +47,55 @@ back_href = f"/?date={date}&theme={_theme}" if date else f"/?theme={_theme}"
 st.markdown(f'<a class="dv-back" href="{back_href}" target="_self">&larr; Back to slate</a>',
             unsafe_allow_html=True)
 
-if not date or not game_pk:
+def _resolve_by_teams(date: str, away: str, home: str, gnum) -> int | None:
+    """gamePk for the away@home matchup on `date` -- the human-readable URL
+    (?date=&away=&home=) someone can read before clicking. Slate meta first
+    (offline), live schedule as fallback; `gnum` picks a doubleheader game."""
+    cand = [x for x in (store.load_slate_meta(date) or [])
+            if str(x.get("away", "")).upper() == away
+            and str(x.get("home", "")).upper() == home]
+    if not cand:
+        try:
+            slate = fetch.get_slate(date, today=today_iso())
+        except Exception:  # noqa: BLE001
+            slate = []
+        cand = [{"gamePk": g["gamePk"], "gameNumber": i + 1}
+                for i, g in enumerate(
+                    g for g in slate
+                    if (g["away"].get("abbr") or "").upper() == away
+                    and (g["home"].get("abbr") or "").upper() == home)]
+    if not cand:
+        return None
+    if gnum:
+        try:
+            want = int(gnum)
+            for x in cand:
+                if int(x.get("gameNumber") or 1) == want:
+                    return int(x["gamePk"])
+        except (TypeError, ValueError):
+            pass
+    return int(cand[0]["gamePk"])
+
+
+if not date or not (game_pk or (away_q and home_q)):
     st.info("No game selected. Return to the slate and pick a game.")
     render_footer()
     st.stop()
 
-try:
-    game_pk_int = int(game_pk)
-except (TypeError, ValueError):
-    st.error("Invalid game reference.")
-    render_footer()
-    st.stop()
+if game_pk:
+    try:
+        game_pk_int = int(game_pk)
+    except (TypeError, ValueError):
+        st.error("Invalid game reference.")
+        render_footer()
+        st.stop()
+else:
+    _pk = _resolve_by_teams(date, away_q, home_q, gnum_q)
+    if _pk is None:
+        st.info(f"No {away_q} at {home_q} game found on {date}.")
+        render_footer()
+        st.stop()
+    game_pk_int = _pk
 
 
 def _hero(away: str, home: str, date: str, et: str) -> None:
@@ -217,6 +263,20 @@ if has_numbers and meta:
             else:
                 st.toast("This game hasn't started yet. Actuals appear "
                          "automatically at first pitch.")
+        # Shareable link with the TEAMS and DATE in it. Minted here because
+        # the streamlit.app address bar never follows in-app navigation (the
+        # app lives in an iframe), so this is the only correct thing to copy.
+        with st.popover("Share", help="Copy a link to this game"):
+            _same = [x for x in meta
+                     if str(x.get("away", "")).upper() == str(away).upper()
+                     and str(x.get("home", "")).upper() == str(home).upper()]
+            _share = f"{SHARE_BASE}/Game?date={date}&away={away}&home={home}"
+            if len(_same) > 1:   # doubleheader: pin which game of the day
+                _share += f"&game={int(m.get('gameNumber') or 1)}"
+            st.caption("Anyone with this link opens exactly this game. Copy "
+                       "from here -- the browser address bar doesn't follow "
+                       "in-app navigation.")
+            st.code(_share, language=None)
     if abp:
         st.caption(("Live box score, refreshed automatically. " if _live_actuals
                     else "")
