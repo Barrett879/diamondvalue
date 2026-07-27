@@ -254,7 +254,8 @@ COMMON_CSS = """
     /* Pinned theme toggle (top-right, inside the nav bar row) */
     .st-key-dv_theme_toggle {
         position: fixed;
-        top: 0.35rem; right: 0.9rem;
+        top: 1.5rem; right: 0.9rem;      /* bar is 3rem tall: pin to its */
+        transform: translateY(-50%);     /* midline, truly centered      */
         z-index: 10000;
         width: auto !important;
     }
@@ -293,10 +294,12 @@ COMMON_CSS = """
        straight on it (a child selector matches nothing). */
     .st-key-dv_nav_actions {
         position: fixed;
-        top: 0.35rem; right: 5.6rem;
+        top: 1.5rem; right: 5.6rem;      /* centered on the bar midline, */
+        transform: translateY(-50%);     /* same as the theme toggle     */
         z-index: 10000;
         width: auto !important;
         flex-direction: row !important;
+        align-items: center !important;
         gap: 0.4rem !important;
     }
     .st-key-dv_nav_actions [data-testid="stElementContainer"],
@@ -304,7 +307,8 @@ COMMON_CSS = """
         width: auto !important;
     }
     @media (max-width: 900px) {
-        .st-key-dv_nav_actions { position: static; margin-top: 0.3rem; }
+        .st-key-dv_nav_actions { position: static; transform: none;
+                                 margin-top: 0.3rem; }
     }
 
     /* Brand + hero */
