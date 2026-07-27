@@ -174,9 +174,13 @@ if has_numbers and meta:
         return pd.DataFrame([r for r in rows if r.get("played")])
 
     _lk = f"live_actuals_{game_pk_int}"
+    _pref = f"live_pref_{game_pk_int}"
     _started = _game_started(m.get("gameDate"))
     _live_actuals = False
-    if not abp and _started:
+    # Auto-pull when the game is on and unscored; ALSO when the user pressed
+    # Update actuals on a scored game (a fresh pull is authoritative -- a
+    # committed gamelog can have been scored mid-game).
+    if _started and (not abp or st.session_state.get(_pref)):
         entry = st.session_state.get(_lk)
         if not (isinstance(entry, dict) and time.time() - entry["at"] < 120):
             with st.spinner("Pulling the box score..."):
@@ -186,8 +190,10 @@ if has_numbers and meta:
                     entry = {"at": time.time(), "df": pd.DataFrame()}
             st.session_state[_lk] = entry
         if entry["df"] is not None and not entry["df"].empty:
-            abp = _abp_from(entry["df"])
-            _live_actuals = bool(abp)
+            _live = _abp_from(entry["df"])
+            if _live:
+                abp = _live
+                _live_actuals = True
     # ── Nav-bar actions: both controls live ON the top bar as buttons (the
     #    dv_nav_actions container position:fixes next to the theme toggle).
     #    The popover holds the same paste flow the old bottom expander did;
@@ -198,13 +204,19 @@ if has_numbers and meta:
                 props_ui.render_input(date)
             except Exception:  # noqa: BLE001
                 st.caption("Line input is briefly unavailable (app updating).")
-        # Refresh only makes sense once the game is on and until the committed
-        # (final, scored) gamelogs take over.
-        if _started and (not abp or _live_actuals):
-            if st.button("Update actuals", key="upd_act",
-                         help="Refresh this game's box score now"):
+        # Update actuals is ALWAYS on the bar. Started game: force a fresh
+        # box-score pull now (on a scored game the fresh pull is preferred
+        # from here on -- committed gamelogs can have been scored mid-game).
+        # Unstarted game: nothing to pull, say so.
+        if st.button("Update actuals", key="upd_act",
+                     help="Refresh this game's box score now"):
+            if _started:
                 st.session_state.pop(_lk, None)
+                st.session_state[_pref] = True
                 st.rerun()
+            else:
+                st.toast("This game hasn't started yet. Actuals appear "
+                         "automatically at first pitch.")
     if abp:
         st.caption(("Live box score, refreshed automatically. " if _live_actuals
                     else "")
