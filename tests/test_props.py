@@ -158,20 +158,23 @@ def test_compare_carries_direction_and_flags_unoffered_side():
     assert "Under side not offered" in meta
 
 
-def test_props_meta_flags_feed_demon_under():
-    """A feed-pasted Demon carries odds_type but NO direction; its More-only
-    nature must still label the row and flag an Under lean as unplayable."""
+def test_props_meta_does_not_infer_direction_from_odds_type():
+    """Demons and Goblins are NOT More-only any more (PrizePicks now allows
+    both directions on them), so a feed-pasted alt line with no explicit
+    direction must NOT be flagged unplayable -- hiding a real pick is worse
+    than showing one the market may not offer. The payout tag still shows."""
     from mlblib import store
     meta = store._props_meta({"Stat": "TB", "Model": 0.9, "Line": 4.5,
                               "Edge": -3.6, "Lean": "Under",
                               "Direction": "", "OddsType": "demon"})
-    assert "More only" in meta and "Demon" in meta
-    assert "not offered" in meta
-    # Over on a Goblin IS the playable direction -- no warning.
-    ok = store._props_meta({"Stat": "H", "Model": 1.1, "Line": 0.5,
-                            "Edge": 0.6, "Lean": "Over",
-                            "Direction": "", "OddsType": "goblin"})
-    assert "not offered" not in ok and "More only" in ok
+    assert "Demon" in meta                 # payout tag still labelled
+    assert "not offered" not in meta       # but no unplayable claim
+    assert "More only" not in meta         # and no invented direction
+    # An explicit board-text direction is still honoured.
+    flagged = store._props_meta({"Stat": "TB", "Model": 0.9, "Line": 4.5,
+                                 "Edge": -3.6, "Lean": "Under",
+                                 "Direction": "more", "OddsType": "demon"})
+    assert "More only" in flagged and "not offered" in flagged
 
 
 def test_props_meta_no_flag_when_side_offered():
@@ -442,14 +445,14 @@ def test_saved_line_dates_and_global_reach(tmp_path, monkeypatch):
 
 
 def test_compare_marks_impossible_leans_unplayable():
-    """A lean must be a side the user can actually take: Demons AND Goblins are
-    More-only on PrizePicks, and board-text lines carry the real Less/More
-    buttons. Recommending Under on a More-only line is an impossible pick."""
+    """A lean must be a side the user can actually take, judged ONLY by the
+    board's explicit Less/More buttons. Demons and Goblins are no longer
+    More-only, so an alt line with no stated direction stays playable."""
     lines = pd.DataFrame([
-        # Marte model TB = 2.0: Demon alt at 4.5 leans Under -> NOT playable.
+        # Demon at 4.5 with NO stated direction -> assume both, playable.
         {"name": "Ketel Marte", "stat_type": "Total Bases", "line": 4.5,
          "odds_type": "demon", "direction": ""},
-        # Marte model H = 1.1: Goblin at 0.5 leans Over -> More-only is fine.
+        # Goblin at 0.5 with no stated direction -> also playable.
         {"name": "Ketel Marte", "stat_type": "Hits", "line": 0.5,
          "odds_type": "goblin", "direction": ""},
         # Gallen model K = 6.0 vs 6.5 leans Under; board says Less offered.
@@ -463,11 +466,12 @@ def test_compare_marks_impossible_leans_unplayable():
     ])
     table, _ = props.compare(lines, _preds())
     by = {(r["Player"], r["Stat"]): r for _, r in table.iterrows()}
-    assert not by[("Ketel Marte", "Total Bases")]["Playable"]
-    assert by[("Ketel Marte", "Hits")]["Playable"]
-    assert by[("Zac Gallen", "Pitcher K")]["Playable"]
+    assert by[("Ketel Marte", "Total Bases")]["Playable"]   # demon, no direction
+    assert by[("Ketel Marte", "Hits")]["Playable"]          # goblin, no direction
+    assert by[("Zac Gallen", "Pitcher K")]["Playable"]      # Under, Less offered
+    # Over lean where the board explicitly offers Less ONLY -> not playable.
     assert not by[("Zac Gallen", "Hits Allowed")]["Playable"]
-    assert by[("Ketel Marte", "Home Runs")]["Playable"]
+    assert by[("Ketel Marte", "Home Runs")]["Playable"]     # no info -> both
 
 
 def test_dedup_never_lets_unknown_odds_shadow_standard():

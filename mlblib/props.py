@@ -471,15 +471,19 @@ _ACTUAL_PIT = {"K": ("p_K", 1.0), "BB": ("p_BB", 1.0), "H": ("p_H", 1.0),
 
 def _offered_sides(direction, odds_type) -> str:
     """Which side(s) of the line can actually be taken: 'both', 'more', or
-    'less'. An explicit direction (parsed from the board's Less/More buttons)
-    wins; otherwise infer from the odds type -- PrizePicks Demons AND Goblins
-    are both More-only (Less is never offered on an alt line), standard offers
-    both sides."""
+    'less'.
+
+    ONLY an explicit direction counts -- the one parsed from the board's own
+    Less/More buttons. Never infer it from the odds type: PrizePicks' help
+    center and product page now both read "You can now pick More or Less on
+    Demons and Goblins", so the old Demon/Goblin-are-More-only rule is dead
+    (most third-party guides still repeat it). When direction is unknown, the
+    safe default is 'both': showing a line the market may not offer is a much
+    smaller failure than silently hiding a real one."""
     d = str(direction or "").strip().lower()
     if d in ("both", "more", "less"):
         return d
-    o = str(odds_type or "").strip().lower()
-    return "more" if o in ("demon", "goblin") else "both"
+    return "both"
 
 
 def _actual_for(cols, scale, role, arow) -> float | None:

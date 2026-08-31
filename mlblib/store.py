@@ -229,15 +229,13 @@ def _props_meta(p: dict) -> str:
     market does not offer. Informational market facts, not a wager prompt."""
     direction = str(p.get("Direction", "") or "")
     odds = str(p.get("OddsType", "") or "").lower()
-    # Offered sides come from the explicit board-text buttons when present,
-    # else are inferred from the odds type: Demons AND Goblins are More-only
-    # (the feed carries only odds_type, and a feed-pasted Demon must flag an
-    # Under lean as unplayable just like a board-text one).
+    # Offered sides come ONLY from the board's explicit Less/More buttons.
+    # Demons and Goblins are no longer More-only (PrizePicks now allows both
+    # directions on them), so an unknown direction means both, not More.
     from .props import _offered_sides
     offered = _offered_sides(direction, odds)
     bits = []
-    label = (_DIR_LABEL.get(direction)
-             or (_DIR_LABEL.get(offered) if odds in ("demon", "goblin") else None))
+    label = _DIR_LABEL.get(direction)
     if label:
         bits.append(f'<span class="pd">{label}</span>')
     if odds in ("demon", "goblin"):
