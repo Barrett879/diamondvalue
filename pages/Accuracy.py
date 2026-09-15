@@ -139,6 +139,28 @@ if _summary and _summary.get("graded"):
                       "Goblins are in this data at all."
                       if _summary.get("all_standard") else ""))
 
+    if _summary.get("by_direction"):
+        _au = _summary.get("always_under_pct")
+        st.markdown("**Over vs Under, against the right benchmark.** This "
+                    "board's outcomes are not a 50/50 coin flip: unders hit "
+                    f"{_au}% of the time on their own. So the fair test for "
+                    "each direction is not 50 percent, it is what betting "
+                    "that side on everything would have done.")
+        _bd = pd.DataFrame(_summary["by_direction"])
+        _bd["hit"] = _bd["hit_pct"].map(lambda v: f"{v:.1f}%")
+        _bd["bench"] = _bd["benchmark_pct"].map(lambda v: f"{v:.1f}%")
+        _bd["skill"] = _bd["skill_pts"].map(lambda v: f"{v:+.1f} pts")
+        st.markdown(store.html_df(
+            _bd[["lean", "n", "hit", "bench", "skill"]].rename(columns={
+                "lean": "Lean", "n": "N", "hit": "Hit %",
+                "bench": "Always this side", "skill": "Difference"}),
+            label_cols=1, hero=("Difference",)), unsafe_allow_html=True)
+        st.caption("Read the top-slice table above through this. Most of the "
+                   "model's confident leans are Unders, and unders already win "
+                   f"{_au}% of the time here, so the honest measure of the "
+                   "model is the gap between its slice and simply betting "
+                   "Under on everything.")
+
     if _summary.get("by_stat"):
         st.markdown("**By stat.**")
         _bs = pd.DataFrame(_summary["by_stat"])

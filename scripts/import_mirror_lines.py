@@ -206,6 +206,21 @@ def write_summary(hist: pd.DataFrame) -> None:
                        "hit_pct": round(100 * pr, 1),
                        "ci_lo": round(100 * (pr - 1.96 * se), 1),
                        "ci_hi": round(100 * (pr + 1.96 * se), 1)})
+    # THE CONTROL that keeps the top-slice number honest: this board's
+    # outcomes are not 50/50. Unders hit 52.7% unconditionally, so a lean set
+    # that is 75% Unders looks skilled without being skilled. Report the base
+    # rate and each direction against its own always-that-side benchmark.
+    base_over = float((g["result"] == "over").mean())
+    by_dir = []
+    for lean, bench in (("Over", base_over), ("Under", 1.0 - base_over)):
+        sel = g[g["lean"] == lean]
+        if not len(sel):
+            continue
+        pr = sel["model_right"].mean()
+        by_dir.append({"lean": lean, "n": int(len(sel)),
+                       "hit_pct": round(100 * pr, 1),
+                       "benchmark_pct": round(100 * bench, 1),
+                       "skill_pts": round(100 * (pr - bench), 1)})
     by_stat = []
     for stat, sel in g.groupby("stat"):
         by_stat.append({"stat": stat, "n": int(len(sel)),
@@ -222,6 +237,9 @@ def write_summary(hist: pd.DataFrame) -> None:
         "exact": int((hist["result"] == "exact").sum()),
         "by_confidence": buckets,
         "by_top_slice": slices,
+        "base_over_pct": round(100 * base_over, 1),
+        "always_under_pct": round(100 * (1 - base_over), 1),
+        "by_direction": by_dir,
         "all_standard": bool((hist["odds_type"] == "standard").all()),
         "by_stat": sorted(by_stat, key=lambda r: -r["n"]),
     }
