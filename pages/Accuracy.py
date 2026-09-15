@@ -95,12 +95,23 @@ if ph is not None and not ph.empty:
     c2.metric("Model called it right", f"{n_right} ({pct:.0f}%)")
     c3.metric("Slates with lines", f"{n_days}")
     if n_g:
-        # Does a bigger disagreement with the board mean a better call? The one
-        # question worth asking of this data, so bucket by edge size.
-        b = g.assign(bucket=pd.cut(g["edge"].abs(),
-                                   [0, 0.25, 0.5, 1.0, float("inf")],
-                                   labels=["under 0.25", "0.25 to 0.5",
-                                           "0.5 to 1.0", "over 1.0"]))
+        # Bucket by CONFIDENCE, not by the raw mean-vs-line gap: the lean comes
+        # from P(Over), and a big gap on a low line can still be a coin flip.
+        # Falls back to the gap for rows graded before p_over was recorded.
+        conf = ((g["p_over"] - 0.5).abs() if "p_over" in g.columns
+                else pd.Series(float("nan"), index=g.index))
+        if conf.notna().any():
+            b = g.assign(bucket=pd.cut(conf, [0, 0.05, 0.10, 0.20, 0.50],
+                                       labels=["coin flip (50-55%)", "55-60%",
+                                               "60-70%", "70%+"],
+                                       include_lowest=True))
+            gap_label = "Model confidence"
+        else:
+            b = g.assign(bucket=pd.cut(g["edge"].abs(),
+                                       [0, 0.25, 0.5, 1.0, float("inf")],
+                                       labels=["under 0.25", "0.25 to 0.5",
+                                               "0.5 to 1.0", "over 1.0"]))
+            gap_label = "Model-vs-line gap"
         by = (b.groupby("bucket", observed=True)
               .agg(N=("model_right", "size"), right=("model_right", "sum"))
               .reset_index())
@@ -108,7 +119,7 @@ if ph is not None and not ph.empty:
         # which turns a hit rate into "25.000".
         by["hit_rate"] = [f"{100 * r / n:.0f}%" for r, n in zip(by["right"], by["N"])]
         st.markdown(store.html_df(
-            by.rename(columns={"bucket": "Model-vs-line gap", "hit_rate": "Hit %"}),
+            by.rename(columns={"bucket": gap_label, "hit_rate": "Hit %"}),
             label_cols=1, hero=("Hit %",)), unsafe_allow_html=True)
     st.caption(
         f"{n_exact} line(s) landed exactly on the number, which PrizePicks "
@@ -116,7 +127,10 @@ if ph is not None and not ph.empty:
         "but not counted either way. Lines are only graded when the side the "
         "model leans is one the board actually offered. This tally covers "
         "whichever boards happened to get pasted, so treat it as a curiosity, "
-        "not a measured edge over the market.")
+        "not a measured edge over the market. For scale, a PrizePicks entry "
+        "needs roughly 54 to 58 percent per leg just to break even, so 50 "
+        "percent is not the bar and a few hundred props cannot separate a real "
+        "edge from luck.")
     with st.expander(f"Every graded line ({len(ph)})"):
         st.markdown(store.html_df(ph.sort_values("date", ascending=False),
                                   label_cols=3), unsafe_allow_html=True)

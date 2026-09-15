@@ -13,6 +13,7 @@ only where PrizePicks does not block the client.
 from __future__ import annotations
 
 import json
+import math
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -469,6 +470,60 @@ _ACTUAL_PIT = {"K": ("p_K", 1.0), "BB": ("p_BB", 1.0), "H": ("p_H", 1.0),
                "ER": ("p_ER", 1.0), "IP": ("p_outs", 3.0), "Pitches": ("p_pitches", 1.0)}
 
 
+# ── Over/under probability ───────────────────────────────────────────────────
+# A lean must come from P(Over), never from mean-vs-line. Count stats are
+# right-skewed, so the median sits BELOW the mean and "mean > line" over-calls
+# Over inside a band roughly 0.17-0.19 wide above every line. Worked example:
+# a projected mean of 0.55 against a 0.5 line has P(Over) = 0.423, so the
+# honest call is UNDER while the mean rule says Over. At a 0.5 line P(Over)
+# only passes 0.5 once the mean clears 0.693; at 1.5 it is 1.678.
+#
+# Poisson is used as the predictive distribution. Real per-game baseball counts
+# are mildly overdispersed relative to Poisson, which pushes P(Over) a little
+# further toward 0.5; that makes this a conservative first-order correction
+# rather than a perfect one, and it fixes the sign error either way.
+# Implemented without scipy on purpose: scipy is not a declared dependency and
+# adding one has broken a Streamlit Cloud build here before.
+
+def _pois_cdf(k: int, mu: float) -> float:
+    """P(X <= k) for X ~ Poisson(mu), by direct summation."""
+    if k < 0:
+        return 0.0
+    if mu <= 0:
+        return 1.0
+    total = 0.0
+    for i in range(int(k) + 1):
+        total += math.exp(-mu + i * math.log(mu) - math.lgamma(i + 1))
+    return min(1.0, total)
+
+
+def over_under_probs(mean: float, line: float,
+                     count_mult: float = 1.0) -> tuple[float, float, float]:
+    """(P(over), P(under), P(exact)) for a posted line.
+
+    `count_mult` rescales onto the integer count the stat is actually made of:
+    an innings-pitched prop is graded on OUTS, so 5.5 innings is 16.5 outs.
+    P(exact) is non-zero only for a whole-number line, which PrizePicks treats
+    as a lower payout tier rather than a push.
+    """
+    if mean is None or line is None or not np.isfinite(mean) or not np.isfinite(line):
+        return (float("nan"),) * 3
+    mu = max(0.0, float(mean) * count_mult)
+    ln = float(line) * count_mult
+    if ln < 0:                     # a negative line can only go over
+        return 1.0, 0.0, 0.0
+    p_over = 1.0 - _pois_cdf(math.floor(ln + 1e-9), mu)
+    p_under = _pois_cdf(math.ceil(ln - 1e-9) - 1, mu)
+    p_exact = max(0.0, 1.0 - p_over - p_under)
+    return p_over, p_under, p_exact
+
+
+def _count_mult(cols, scale: float) -> float:
+    """Factor putting (mean, line) on the integer-count scale. Innings are the
+    only non-count unit here: the underlying count is outs."""
+    return 3.0 if (list(cols) == ["IP"] and scale == 1.0) else 1.0
+
+
 def _offered_sides(direction, odds_type) -> str:
     """Which side(s) of the line can actually be taken: 'both', 'more', or
     'less'.
@@ -565,7 +620,15 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame,
         edge = model - line
         arow = act_lookup.get(_key(row.get("personId"), row.get("gamePk")))
         actual = _actual_for(cols, scale, row["role"], arow) if arow is not None else None
-        lean = "Over" if edge > 0 else ("Under" if edge < 0 else "Even")
+        # Lean from the PREDICTIVE PROBABILITY, not the mean-vs-line gap.
+        p_over, p_under, _p_exact = over_under_probs(
+            model, line, _count_mult(cols, scale))
+        if p_over != p_over:                       # NaN -> no callable side
+            lean = "Even"
+        elif abs(p_over - 0.5) < 1e-9:
+            lean = "Even"
+        else:
+            lean = "Over" if p_over > 0.5 else "Under"
         # A lean is only actionable when that side of the line is offered:
         # recommending Under on a More-only Demon is an impossible pick.
         offered = _offered_sides(ln.get("direction"), ln.get("odds_type"))
@@ -580,6 +643,7 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame,
             "Line": round(line, 2),
             "Edge": round(edge, 2),
             "Lean": lean,
+            "P(Over)": (round(p_over, 3) if p_over == p_over else None),
             "Direction": ln.get("direction") or "",
             "OddsType": ln.get("odds_type") or "",
             "Playable": playable,

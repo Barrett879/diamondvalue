@@ -76,7 +76,7 @@ def props_by_name(scope_preds: pd.DataFrame, date_iso: str) -> dict:
     for _, r in table.iterrows():
         out.setdefault(r["Player"], []).append(
             {"Stat": r["Stat"], "Model": r["Model"], "Line": r["Line"],
-             "Edge": r["Edge"], "Lean": r["Lean"],
+             "Edge": r["Edge"], "Lean": r["Lean"], "P(Over)": r.get("P(Over)"),
              "Direction": r.get("Direction", ""), "OddsType": r.get("OddsType", ""),
              "Actual": r.get("Actual")})
     return out
@@ -144,16 +144,17 @@ def render_board(scope_preds: pd.DataFrame, date_iso: str,
     st.markdown('<div class="dv-eyebrow">Model vs the board &middot; '
                 'PrizePicks lines</div>', unsafe_allow_html=True)
 
-    # Only ACTIONABLE lines make the recommendations: a Demon/Goblin the model
-    # leans Under on cannot be taken (both alt types are More-only), so it must
-    # never top the edge board. Hidden lines still show on each player's
+    # Only ACTIONABLE lines make the recommendations: if the board offers just
+    # one side and the model leans the other, there is nothing to act on, so it
+    # must never top the edge board. Offered sides come from the board's own
+    # Less/More buttons; they are NOT inferred from Demon/Goblin, which now
+    # allow both directions. Hidden lines still show on each player's
     # expandable row with their "side not offered" note.
     playable = table[table["Playable"]] if "Playable" in table.columns else table
     n_hidden = len(table) - len(playable)
     if playable.empty:
-        st.info(f"All {len(table)} matched line(s) lean a side PrizePicks does "
-                "not offer (Demons and Goblins are More-only), so there is "
-                "nothing to act on.")
+        st.info(f"All {len(table)} matched line(s) lean a side the board does "
+                "not offer, so there is nothing to act on.")
         return n
 
     strip = playable[playable["Edge"].abs() >= 0.005]
@@ -182,6 +183,8 @@ def render_board(scope_preds: pd.DataFrame, date_iso: str,
     if show_ledger:
         # The per-line direction / odds ride on the expandable player rows, not
         # this compact ledger; drop them so the table stays Player..Lean wide.
+        # P(Over) stays visible: it is what the lean is actually based on,
+        # and the mean-vs-line Edge alone misleads on low lines.
         ledger = playable[[c for c in playable.columns
                            if c not in ("Direction", "OddsType", "Playable",
                                         "Actual")]]

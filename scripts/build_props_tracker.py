@@ -79,6 +79,8 @@ def score_date(date: str) -> pd.DataFrame:
             "model": float(r["Model"]),
             "line": line,
             "edge": float(r["Edge"]),
+            "p_over": (float(r["P(Over)"]) if r.get("P(Over)") is not None
+                       and r.get("P(Over)") == r.get("P(Over)") else float("nan")),
             "lean": lean,
             "odds_type": str(r.get("OddsType") or ""),
             "direction": str(r.get("Direction") or ""),

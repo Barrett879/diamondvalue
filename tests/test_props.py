@@ -458,8 +458,12 @@ def test_compare_marks_impossible_leans_unplayable():
         # Gallen model K = 6.0 vs 6.5 leans Under; board says Less offered.
         {"name": "Zac Gallen", "stat_type": "Pitcher Strikeouts", "line": 6.5,
          "odds_type": "standard", "direction": "less"},
-        # Gallen model H = 5.5 vs 5.0 leans Over; board offers Less ONLY.
-        {"name": "Zac Gallen", "stat_type": "Hits Allowed", "line": 5.0,
+        # Gallen model H = 5.5 vs 4.0: P(Over)=0.686 so the lean IS Over, but
+        # the board offers Less ONLY -> unplayable. (Line 5.0 would NOT work
+        # here: a whole-number line one below the mean still gives P(Over)=0.44
+        # once the exact-landing mass is counted, which is the whole point of
+        # leaning on the probability instead of the mean gap.)
+        {"name": "Zac Gallen", "stat_type": "Hits Allowed", "line": 4.0,
          "odds_type": "standard", "direction": "less"},
         # No direction/odds info at all -> assume both sides, playable.
         {"name": "Ketel Marte", "stat_type": "Home Runs", "line": 0.5},
@@ -563,3 +567,49 @@ def test_props_tracker_degrades_without_inputs(monkeypatch):
         [{"name": "X Y", "stat_type": "Hits", "line": 0.5}]))
     monkeypatch.setattr(_store, "load_predictions", lambda d: None)
     assert bpt.score_date("2026-07-17").empty
+
+
+# ── Leans come from P(Over), not mean-vs-line ────────────────────────────────
+
+def test_over_under_probs_basic_shape():
+    po, pu, pe = props.over_under_probs(1.0, 1.5)
+    assert abs(po + pu + pe - 1.0) < 1e-9
+    assert pe == 0.0                       # half-integer line cannot land exact
+    # Whole-number line: exact is a real outcome (lower payout tier, not a push)
+    po, pu, pe = props.over_under_probs(1.0, 1.0)
+    assert pe > 0 and abs(po + pu + pe - 1.0) < 1e-9
+    # Innings props are graded on OUTS, so 5.5 IP means 16.5 outs.
+    assert props.over_under_probs(6.0, 5.5, props._count_mult(["IP"], 1.0))[0] > 0.5
+    assert props._count_mult(["IP"], 1.0) == 3.0    # innings -> outs
+    assert props._count_mult(["IP"], 3.0) == 1.0    # already outs
+    assert props._count_mult(["TB"], 1.0) == 1.0
+    # Degenerate inputs do not raise.
+    assert props.over_under_probs(float("nan"), 1.5)[0] != props.over_under_probs(1.0, 1.5)[0]
+
+
+def test_lean_uses_probability_not_the_mean_gap():
+    """The bug this guards: a mean just above the line does NOT mean P(Over)>0.5.
+    A 0.55 projection against a 0.5 line has P(Over)=0.423, so the honest lean
+    is UNDER even though the model mean is higher than the line."""
+    preds = pd.DataFrame([
+        {"fullName": "Slim Edge", "role": "bat", "HR": 0.55, "TB": 1.55,
+         "H": 1.0, "SO": .8, "BB": .3, "R": .5, "RBI": .4,
+         "b1": .6, "b2": .2, "b3": .0, "SB": .05},
+    ])
+    lines = pd.DataFrame([
+        {"name": "Slim Edge", "stat_type": "Home Runs", "line": 0.5},
+        {"name": "Slim Edge", "stat_type": "Total Bases", "line": 1.5},
+    ])
+    table, _ = props.compare(lines, preds)
+    by = {r["Stat"]: r for _, r in table.iterrows()}
+    hr = by["Home Runs"]
+    assert hr["Edge"] > 0                  # mean IS above the line
+    assert hr["P(Over)"] < 0.5             # but the probability is not
+    assert hr["Lean"] == "Under"           # so the lean must say Under
+    tb = by["Total Bases"]
+    assert tb["Edge"] > 0 and tb["P(Over)"] < 0.5 and tb["Lean"] == "Under"
+    # A mean clearly past the crossover still leans Over.
+    strong = props.compare(pd.DataFrame([
+        {"name": "Slim Edge", "stat_type": "Home Runs", "line": 0.5}]),
+        preds.assign(HR=1.2))[0].iloc[0]
+    assert strong["P(Over)"] > 0.5 and strong["Lean"] == "Over"
