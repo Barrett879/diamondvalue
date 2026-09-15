@@ -24,9 +24,13 @@ render_nav("Accuracy")
 
 st.markdown('<div class="dv-brand">Accuracy</div>', unsafe_allow_html=True)
 st.caption("Model predictions scored against actual results, next to the "
-           "season-average baseline. Lower mean absolute error is better. "
-           "Every number is an expected value, so the honest test is whether "
-           "the model beats a simple season average, not whether it calls games.")
+           "season-average baseline, on exactly the same rows for both. Lower "
+           "mean absolute error is better. Read it honestly: across every "
+           "tracked stat the model is within a rounding error of a season "
+           "average overall. The gains are real but narrow and sit on the "
+           "pitching side, and several batting stats lose. Every number is an "
+           "expected value, so this measures whether the model beats a simple "
+           "season average, not whether it calls games.")
 
 acc = cache.read_parquet_or_none(cache.dc_path("accuracy_history_v1.parquet"))
 if acc is None or acc.empty:
@@ -38,6 +42,12 @@ if acc is None or acc.empty:
 
 # Per-stat summary: model MAE vs season-average baseline MAE.
 if {"stat", "abs_err_model", "abs_err_b2"}.issubset(acc.columns):
+    # PAIRED comparison only. pandas averages each column independently, so
+    # rows that have a model error but no baseline error (a player with no
+    # season-to-date history, or historically a scratched player scored as a
+    # phantom zero) inflated the model column alone. That artifact turned a
+    # true -0.07% into a published +4.60%.
+    acc = acc.dropna(subset=["abs_err_model", "abs_err_b2"])
     summary = (acc.groupby("stat")
                .agg(n=("abs_err_model", "size"),
                     model_MAE=("abs_err_model", "mean"),

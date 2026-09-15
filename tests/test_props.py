@@ -669,3 +669,45 @@ def test_nb_cdf_matches_poisson_as_dispersion_grows():
         assert abs(props._nb_cdf(k, mu, 1e9) - props._pois_cdf(k, mu)) < 1e-4
     # And it is strictly wider than Poisson for finite r (more mass low AND high)
     assert props._nb_cdf(0, 2.0, 1.0) > props._pois_cdf(0, 2.0)
+
+
+# ── Regression: a scratched player must never score as a real zero ───────────
+
+def test_parse_boxscore_leaves_batting_none_when_player_did_not_bat():
+    """The bug this guards: doubles/triples/HR/hits/singles used
+    `bat.get(x, 0) or 0`, which turns an EMPTY boxscore (a scratched player)
+    into a hard 0 while every sibling stat correctly lands as None. That put
+    50,406 phantom actuals of zero into the gamelogs, and because pandas
+    averages each column independently it inflated the published accuracy by
+    turning a true -0.07% into +4.60%."""
+    from mlblib import parse
+    bs = {"teams": {"away": {"team": {"id": 1}, "players": {
+        # Scratched: on the roster, no batting or pitching block at all.
+        "ID100": {"person": {"id": 100, "fullName": "Did Not Play"},
+                  "stats": {"batting": {}, "pitching": {}},
+                  "battingOrder": None},
+        # Played: a real batting line.
+        "ID101": {"person": {"id": 101, "fullName": "Played Guy"},
+                  "stats": {"batting": {"plateAppearances": 4, "atBats": 4,
+                                        "hits": 2, "doubles": 1, "triples": 0,
+                                        "homeRuns": 1, "baseOnBalls": 0,
+                                        "strikeOuts": 1, "runs": 1, "rbi": 2,
+                                        "totalBases": 6, "stolenBases": 0},
+                            "pitching": {}},
+                  "battingOrder": "300"},
+    }}, "home": {"team": {"id": 2}, "players": {}}}}
+    rows = parse.parse_boxscore(bs, {"gamePk": 1, "officialDate": "2026-07-17",
+                                     "gameDate": None, "gameNumber": 1,
+                                     "venue_id": None, "dayNight": None})
+    by = {r["personId"]: r for r in rows}
+    dnp = by[100]
+    assert not dnp["played"]
+    # The five that used to zero-fill must now be None, like their siblings.
+    for col in ("H", "b1", "b2", "b3", "HR"):
+        assert dnp[col] is None, f"{col} zero-filled for a scratched player"
+    for col in ("PA", "AB", "BB", "SO", "R", "RBI", "TB"):
+        assert dnp[col] is None
+    # A player who did bat is unaffected.
+    ok = by[101]
+    assert ok["played"] and ok["H"] == 2 and ok["b2"] == 1 and ok["HR"] == 1
+    assert ok["b1"] == 0                      # 2 hits - 1 double - 1 HR

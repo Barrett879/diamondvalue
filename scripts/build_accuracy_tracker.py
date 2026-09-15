@@ -59,7 +59,12 @@ def score_date(date: str) -> pd.DataFrame:
     if logs.empty:
         logger.warning("%s: no gamelogs for season %s", date, season)
         return pd.DataFrame()
-    actual = logs[["personId", "gamePk"] + F.BAT_COUNTS + F.PIT_COUNTS].drop_duplicates(
+    # Defence in depth: only rows where the player actually appeared can be
+    # scored. Without this, any stat that zero-fills on a missing boxscore
+    # enters the history as a real actual of 0 (see the parse.py comment).
+    played_logs = logs[logs["played"]] if "played" in logs.columns else logs
+    actual = played_logs[["personId", "gamePk"] + F.BAT_COUNTS
+                         + F.PIT_COUNTS].drop_duplicates(
         subset=["personId", "gamePk"])
 
     rows = []

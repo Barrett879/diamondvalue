@@ -100,11 +100,19 @@ def parse_boxscore(raw: dict, meta: dict) -> list[dict]:
             has_pit = bool(pit) and pit.get("battersFaced") is not None
             played = appeared_in_order or has_bat or has_pit
 
-            doubles = bat.get("doubles", 0) or 0
-            triples = bat.get("triples", 0) or 0
-            hr = bat.get("homeRuns", 0) or 0
-            hits = bat.get("hits", 0) or 0
-            singles = max(hits - doubles - triples - hr, 0)
+            # These five MUST be None when the player did not bat, exactly like
+            # every sibling stat (PA/AB/BB/SO/R/RBI/TB/SB are bare bat.get()).
+            # `bat` is an empty dict for a scratched player, so the old
+            # `bat.get(x, 0) or 0` turned "did not play" into a hard 0 on
+            # 50,406 rows, which then scored as a real actual of zero.
+            if has_bat:
+                doubles = bat.get("doubles", 0) or 0
+                triples = bat.get("triples", 0) or 0
+                hr = bat.get("homeRuns", 0) or 0
+                hits = bat.get("hits", 0) or 0
+                singles = max(hits - doubles - triples - hr, 0)
+            else:
+                doubles = triples = hr = hits = singles = None
 
             outs = _ip_to_outs(pit.get("inningsPitched")) if has_pit else None
             gs = pit.get("gamesStarted")
