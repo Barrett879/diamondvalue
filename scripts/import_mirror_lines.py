@@ -238,7 +238,10 @@ def write_summary(hist: pd.DataFrame) -> None:
                 "hit_pct": round(100 * pr, 1),
                 "benchmark_pct": round(100 * bench, 1),
                 "skill_pts": round(100 * (pr - bench), 1)})
-    by_stat_dir.sort(key=lambda r: -r["skill_pts"])
+    # Sorted by raw hit rate, which is what Barrett reads first. The benchmark
+    # column has to travel with it: the top rows are all Unders because unders
+    # win more often here anyway, so a high hit rate is not by itself skill.
+    by_stat_dir.sort(key=lambda r: -r["hit_pct"])
 
     by_stat = []
     for stat, sel in g.groupby("stat"):

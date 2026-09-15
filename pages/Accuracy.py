@@ -162,10 +162,11 @@ if _summary and _summary.get("graded"):
                    "Under on everything.")
 
     if _summary.get("by_stat_direction"):
-        st.markdown("**Stat and direction together.** Each cell measured "
-                    "against its own base rate, meaning what betting that side "
-                    "on every prop of that stat would have returned. Cells "
-                    "under 100 props are left out because they say nothing.")
+        st.markdown("**Stat and direction together, best hit rate first.** "
+                    "Each cell is also shown against its own base rate, "
+                    "meaning what betting that side on every prop of that stat "
+                    "would have returned. Cells under 100 props are left out "
+                    "because they say nothing.")
         _sd = pd.DataFrame(_summary["by_stat_direction"])
         _sd["hit"] = _sd["hit_pct"].map(lambda v: f"{v:.1f}%")
         _sd["bench"] = _sd["benchmark_pct"].map(lambda v: f"{v:.1f}%")
@@ -175,7 +176,13 @@ if _summary and _summary.get("graded"):
                 "stat": "Stat", "lean": "Lean", "n": "N", "hit": "Hit %",
                 "bench": "Always this side", "skill": "Difference"}),
             label_cols=2, hero=("Difference",)), unsafe_allow_html=True)
-        st.caption("Pitcher strikeouts is the one to notice: it is the model's "
+        st.caption("Note that the top of this table is all Unders, which is "
+                   "mostly because unders win more often here to begin with. "
+                   "The Difference column is the part that is actually skill: "
+                   "Earned Runs and Hits Allowed Overs beat their own base "
+                   "rate by more than Total Bases Under does, despite sitting "
+                   "lower on hit rate. "
+                   "Pitcher strikeouts is the one to notice: it is the model's "
                    "strongest stat on raw accuracy and its only losing one "
                    "here, on both sides. The most heavily traded prop on the "
                    "board is also the hardest to beat. Total Bases, by "
