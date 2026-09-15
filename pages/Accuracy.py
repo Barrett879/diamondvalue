@@ -77,63 +77,60 @@ if {"stat", "abs_err_model", "abs_err_b2"}.issubset(acc.columns):
         label_cols=1, hero=("Edge",)), unsafe_allow_html=True)
 
 # ── Model vs the board: the PrizePicks scoreboard, kept for fun ──────────────
-# Only appears once some pasted lines have been graded. Framed as a running
-# tally, not a claim: the sample is whatever boards got pasted, so it is a
-# curiosity rather than evidence of a market edge.
-ph = cache.read_parquet_or_none(cache.dc_path("props_history_v1.parquet"))
-if ph is not None and not ph.empty:
+# Reads the committed AGGREGATE (cache/props_summary_v1.json). The per-line
+# history is deliberately NOT published: its line values come from a
+# third-party mirror of the PrizePicks API, so only derived counts and rates
+# are shared. Renders nothing until there is something to show.
+_summary = None
+_sp = cache.dc_path("props_summary_v1.json")
+if _sp.exists():
+    try:
+        _summary = cache.json_load(_sp)
+    except Exception:  # noqa: BLE001
+        _summary = None
+
+if _summary and _summary.get("graded"):
     st.markdown('<div class="dv-bar-rule"></div>', unsafe_allow_html=True)
     st.markdown('<div class="dv-eyebrow">Model vs the board &middot; '
                 'PrizePicks lines</div>', unsafe_allow_html=True)
-    g = ph[ph["graded"]]
-    n_g, n_right = len(g), int(g["model_right"].sum())
-    pct = (100.0 * n_right / n_g) if n_g else 0.0
-    n_exact = int((ph["result"] == "exact").sum())
-    n_days = ph["date"].nunique()
     c1, c2, c3 = st.columns(3)
-    c1.metric("Lines graded", f"{n_g}")
-    c2.metric("Model called it right", f"{n_right} ({pct:.0f}%)")
-    c3.metric("Slates with lines", f"{n_days}")
-    if n_g:
-        # Bucket by CONFIDENCE, not by the raw mean-vs-line gap: the lean comes
-        # from P(Over), and a big gap on a low line can still be a coin flip.
-        # Falls back to the gap for rows graded before p_over was recorded.
-        conf = ((g["p_over"] - 0.5).abs() if "p_over" in g.columns
-                else pd.Series(float("nan"), index=g.index))
-        if conf.notna().any():
-            b = g.assign(bucket=pd.cut(conf, [0, 0.05, 0.10, 0.20, 0.50],
-                                       labels=["coin flip (50-55%)", "55-60%",
-                                               "60-70%", "70%+"],
-                                       include_lowest=True))
-            gap_label = "Model confidence"
-        else:
-            b = g.assign(bucket=pd.cut(g["edge"].abs(),
-                                       [0, 0.25, 0.5, 1.0, float("inf")],
-                                       labels=["under 0.25", "0.25 to 0.5",
-                                               "0.5 to 1.0", "over 1.0"]))
-            gap_label = "Model-vs-line gap"
-        by = (b.groupby("bucket", observed=True)
-              .agg(N=("model_right", "size"), right=("model_right", "sum"))
-              .reset_index())
-        # Formatted as a string: html_df renders raw floats to 3 decimals,
-        # which turns a hit rate into "25.000".
-        by["hit_rate"] = [f"{100 * r / n:.0f}%" for r, n in zip(by["right"], by["N"])]
-        st.markdown(store.html_df(
-            by.rename(columns={"bucket": gap_label, "hit_rate": "Hit %"}),
-            label_cols=1, hero=("Hit %",)), unsafe_allow_html=True)
+    c1.metric("Lines graded", f"{_summary['graded']:,}")
+    c2.metric("Model called it right",
+              f"{_summary['right']:,} ({_summary['hit_pct']}%)")
+    c3.metric("Slates covered", f"{_summary['dates']}")
     st.caption(
-        f"{n_exact} line(s) landed exactly on the number, which PrizePicks "
-        "treats as a lower payout tier rather than a push, so they are shown "
-        "but not counted either way. Lines are only graded when the side the "
-        "model leans is one the board actually offered. This tally covers "
-        "whichever boards happened to get pasted, so treat it as a curiosity, "
-        "not a measured edge over the market. For scale, a PrizePicks entry "
+        f"{_summary['date_min']} to {_summary['date_max']}. A PrizePicks entry "
         "needs roughly 54 to 58 percent per leg just to break even, so 50 "
-        "percent is not the bar and a few hundred props cannot separate a real "
-        "edge from luck.")
-    with st.expander(f"Every graded line ({len(ph)})"):
-        st.markdown(store.html_df(ph.sort_values("date", ascending=False),
-                                  label_cols=3), unsafe_allow_html=True)
+        "percent is not the bar and this is a curiosity rather than a measured "
+        "edge over the market. "
+        f"{_summary['exact']} line(s) landed exactly on the number, which "
+        "lowers the payout tier rather than pushing, so they are excluded.")
+
+    if _summary.get("by_confidence"):
+        st.markdown("**By how confident the model was.** If the model has real "
+                    "information, the hit rate should climb with its own "
+                    "confidence.")
+        _bc = pd.DataFrame(_summary["by_confidence"])
+        _bc["hit_pct"] = _bc["hit_pct"].map(lambda v: f"{v:.1f}%")
+        st.markdown(store.html_df(
+            _bc.rename(columns={"bucket": "Model confidence", "n": "N",
+                                "right": "Right", "hit_pct": "Hit %"}),
+            label_cols=1, hero=("Hit %",)), unsafe_allow_html=True)
+    if _summary.get("by_stat"):
+        st.markdown("**By stat.**")
+        _bs = pd.DataFrame(_summary["by_stat"])
+        _bs["hit_pct"] = _bs["hit_pct"].map(lambda v: f"{v:.1f}%")
+        st.markdown(store.html_df(
+            _bs.rename(columns={"stat": "Stat", "n": "N", "hit_pct": "Hit %"}),
+            label_cols=1, hero=("Hit %",)), unsafe_allow_html=True)
+
+    # Per-line detail only when the private history is present locally.
+    _ph = cache.read_parquet_or_none(cache.dc_path("props_history_v1.parquet"))
+    if _ph is not None and not _ph.empty:
+        with st.expander(f"Every graded line ({len(_ph):,}) · local only"):
+            st.markdown(store.html_df(_ph.sort_values("date", ascending=False)
+                                      .head(500), label_cols=3),
+                        unsafe_allow_html=True)
 
 st.markdown("**Scored predictions**")
 st.markdown(store.html_df(acc.sort_values("date").tail(200), label_cols=2),

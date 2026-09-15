@@ -40,21 +40,13 @@ def _outcome(actual: float, line: float) -> str:
     return "exact"
 
 
-def score_date(date: str) -> pd.DataFrame:
-    """One row per posted line that has a settled actual, for `date`."""
-    lines = props.load_lines(date)
-    if lines is None or lines.empty:
-        logger.warning("%s: no saved PrizePicks lines", date)
+def grade(lines: pd.DataFrame, preds: pd.DataFrame, actuals: pd.DataFrame,
+          date: str) -> pd.DataFrame:
+    """Grade explicit frames. Split out from score_date so the historical
+    backfill can pass predictions recovered from git (the live files are pruned
+    after 21 days) rather than whatever is on disk today."""
+    if any(f is None or f.empty for f in (lines, preds, actuals)):
         return pd.DataFrame()
-    preds = store.load_predictions(date)
-    if preds is None or preds.empty:
-        logger.warning("%s: no predictions file", date)
-        return pd.DataFrame()
-    actuals = store.load_actuals(date)
-    if actuals is None or actuals.empty:
-        logger.warning("%s: no actuals yet (game not scored)", date)
-        return pd.DataFrame()
-
     table, _meta = props.compare(lines, preds, actuals=actuals)
     if table.empty:
         logger.warning("%s: no lines matched a projected stat", date)
@@ -91,6 +83,24 @@ def score_date(date: str) -> pd.DataFrame:
             "model_right": bool(graded and lean.lower() == result),
         })
     return pd.DataFrame(rows)
+
+
+def score_date(date: str) -> pd.DataFrame:
+    """One row per posted line that has a settled actual, for `date`, using
+    whatever is currently on disk."""
+    lines = props.load_lines(date)
+    if lines is None or lines.empty:
+        logger.warning("%s: no saved PrizePicks lines", date)
+        return pd.DataFrame()
+    preds = store.load_predictions(date)
+    if preds is None or preds.empty:
+        logger.warning("%s: no predictions file", date)
+        return pd.DataFrame()
+    actuals = store.load_actuals(date)
+    if actuals is None or actuals.empty:
+        logger.warning("%s: no actuals yet (game not scored)", date)
+        return pd.DataFrame()
+    return grade(lines, preds, actuals, date)
 
 
 def main(argv):

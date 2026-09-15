@@ -38,5 +38,8 @@ cache/raw_statcast/
 !cache/predictions_*.parquet
 !cache/slate_*.json
 !cache/accuracy_history_*.parquet
-!cache/props_history_*.parquet
+# props_history holds LINE VALUES from a third-party mirror of the PrizePicks
+# API (no licence, derived from collection their ToS bars). Private on purpose:
+# only the derived aggregate below is published.
+!cache/props_summary_*.json
 cache/raw_airdensity/
