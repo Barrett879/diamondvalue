@@ -76,6 +76,51 @@ if {"stat", "abs_err_model", "abs_err_b2"}.issubset(acc.columns):
                             "seasonavg_MAE": "Season-avg MAE", "edge": "Edge"}),
         label_cols=1, hero=("Edge",)), unsafe_allow_html=True)
 
+# ── Model vs the board: the PrizePicks scoreboard, kept for fun ──────────────
+# Only appears once some pasted lines have been graded. Framed as a running
+# tally, not a claim: the sample is whatever boards got pasted, so it is a
+# curiosity rather than evidence of a market edge.
+ph = cache.read_parquet_or_none(cache.dc_path("props_history_v1.parquet"))
+if ph is not None and not ph.empty:
+    st.markdown('<div class="dv-bar-rule"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="dv-eyebrow">Model vs the board &middot; '
+                'PrizePicks lines</div>', unsafe_allow_html=True)
+    g = ph[ph["graded"]]
+    n_g, n_right = len(g), int(g["model_right"].sum())
+    pct = (100.0 * n_right / n_g) if n_g else 0.0
+    n_exact = int((ph["result"] == "exact").sum())
+    n_days = ph["date"].nunique()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Lines graded", f"{n_g}")
+    c2.metric("Model called it right", f"{n_right} ({pct:.0f}%)")
+    c3.metric("Slates with lines", f"{n_days}")
+    if n_g:
+        # Does a bigger disagreement with the board mean a better call? The one
+        # question worth asking of this data, so bucket by edge size.
+        b = g.assign(bucket=pd.cut(g["edge"].abs(),
+                                   [0, 0.25, 0.5, 1.0, float("inf")],
+                                   labels=["under 0.25", "0.25 to 0.5",
+                                           "0.5 to 1.0", "over 1.0"]))
+        by = (b.groupby("bucket", observed=True)
+              .agg(N=("model_right", "size"), right=("model_right", "sum"))
+              .reset_index())
+        # Formatted as a string: html_df renders raw floats to 3 decimals,
+        # which turns a hit rate into "25.000".
+        by["hit_rate"] = [f"{100 * r / n:.0f}%" for r, n in zip(by["right"], by["N"])]
+        st.markdown(store.html_df(
+            by.rename(columns={"bucket": "Model-vs-line gap", "hit_rate": "Hit %"}),
+            label_cols=1, hero=("Hit %",)), unsafe_allow_html=True)
+    st.caption(
+        f"{n_exact} line(s) landed exactly on the number, which PrizePicks "
+        "treats as a lower payout tier rather than a push, so they are shown "
+        "but not counted either way. Lines are only graded when the side the "
+        "model leans is one the board actually offered. This tally covers "
+        "whichever boards happened to get pasted, so treat it as a curiosity, "
+        "not a measured edge over the market.")
+    with st.expander(f"Every graded line ({len(ph)})"):
+        st.markdown(store.html_df(ph.sort_values("date", ascending=False),
+                                  label_cols=3), unsafe_allow_html=True)
+
 st.markdown("**Scored predictions**")
 st.markdown(store.html_df(acc.sort_values("date").tail(200), label_cols=2),
             unsafe_allow_html=True)

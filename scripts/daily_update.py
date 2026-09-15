@@ -73,6 +73,18 @@ def main(argv: list[str]) -> None:
     except SystemExit:
         logger.warning("no predictions to score for %s", yesterday)
 
+    # Grade any PrizePicks lines that were pasted for yesterday, into the
+    # separate committed props history (the model-vs-the-board scoreboard).
+    # Best-effort and last: it only has data on days Barrett pasted a board,
+    # and it must never fail the run that keeps the projections fresh.
+    import scripts.build_props_tracker as bpt
+    try:
+        bpt.main([yesterday.isoformat()])
+    except SystemExit:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning("props grading skipped: %s", e)
+
     # Tomorrow's slate too (best-effort): the PrizePicks pre-game board goes up
     # the evening before, so the evening run must publish tomorrow's projections
     # for the props comparison to have something to join against. Safe pre-day:

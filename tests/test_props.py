@@ -498,3 +498,68 @@ def test_parse_line_list_reads_grabber_odds_type():
     assert by["Ketel Marte"]["line"] == 1.5            # 3-column line still last
     # parse_any routes the pipe list to the line-list parser (not board/JSON).
     assert len(props.parse_any(txt)) == 4
+
+
+# ── Props tracker: the model-vs-the-board scoreboard ─────────────────────────
+
+def test_props_outcome_buckets():
+    import scripts.build_props_tracker as bpt
+    assert bpt._outcome(2.0, 1.5) == "over"
+    assert bpt._outcome(1.0, 1.5) == "under"
+    assert bpt._outcome(1.5, 1.5) == "exact"   # NOT a push on PrizePicks
+
+
+def test_props_tracker_grades_and_excludes(monkeypatch):
+    """An exact landing is its own bucket (never a win), a lean on a side the
+    board does not offer is recorded but ungraded, and a right/wrong call is
+    scored correctly."""
+    import scripts.build_props_tracker as bpt
+    from mlblib import props as _props, store as _store
+    preds = pd.DataFrame([
+        {"fullName": "Ketel Marte", "role": "bat", "personId": 1, "gamePk": 10,
+         "TB": 2.0, "H": 1.1, "HR": .25, "SO": .8, "BB": .35, "R": .6, "RBI": .5,
+         "b1": .6, "b2": .2, "b3": .01, "SB": .06, "PA": 4.2},
+    ])
+    actuals = pd.DataFrame([
+        {"personId": 1, "gamePk": 10, "TB": 3, "H": 1, "HR": 1, "SO": 1, "BB": 0,
+         "R": 1, "RBI": 2, "b1": 1, "b2": 1, "b3": 0, "SB": 0, "PA": 4},
+    ])
+    lines = pd.DataFrame([
+        # model 2.0 vs 1.5 -> Over; actual 3 -> over; RIGHT
+        {"name": "Ketel Marte", "stat_type": "Total Bases", "line": 1.5,
+         "direction": "both", "odds_type": "standard"},
+        # model 1.1 vs 1.0 -> Over; actual 1 -> EXACT, so ungraded
+        {"name": "Ketel Marte", "stat_type": "Hits", "line": 1.0,
+         "direction": "both", "odds_type": "standard"},
+        # model .25 vs 1.5 -> Under, but only More is offered -> ungraded
+        {"name": "Ketel Marte", "stat_type": "Home Runs", "line": 1.5,
+         "direction": "more", "odds_type": "demon"},
+    ])
+    monkeypatch.setattr(_props, "load_lines", lambda d: lines)
+    monkeypatch.setattr(_store, "load_predictions", lambda d: preds)
+    monkeypatch.setattr(_store, "load_actuals", lambda d: actuals)
+    df = bpt.score_date("2026-07-17")
+    by = {r["stat"]: r for _, r in df.iterrows()}
+    assert by["Total Bases"]["graded"] and by["Total Bases"]["model_right"]
+    assert by["Total Bases"]["result"] == "over"
+    assert by["Hits"]["result"] == "exact"
+    assert not by["Hits"]["graded"] and not by["Hits"]["model_right"]
+    assert not by["Home Runs"]["playable"]       # Under lean, More-only board
+    assert not by["Home Runs"]["graded"]
+    # A DNP (no actual) is dropped entirely rather than graded as a miss.
+    monkeypatch.setattr(_store, "load_actuals", lambda d: pd.DataFrame(
+        [{"personId": 9, "gamePk": 10, "TB": 1, "H": 1}]))
+    assert bpt.score_date("2026-07-17").empty
+
+
+def test_props_tracker_degrades_without_inputs(monkeypatch):
+    """No saved board, no predictions, or an unscored slate all return empty
+    rather than raising, so the daily run is never broken by a missing paste."""
+    import scripts.build_props_tracker as bpt
+    from mlblib import props as _props, store as _store
+    monkeypatch.setattr(_props, "load_lines", lambda d: None)
+    assert bpt.score_date("2026-07-17").empty
+    monkeypatch.setattr(_props, "load_lines", lambda d: pd.DataFrame(
+        [{"name": "X Y", "stat_type": "Hits", "line": 0.5}]))
+    monkeypatch.setattr(_store, "load_predictions", lambda d: None)
+    assert bpt.score_date("2026-07-17").empty

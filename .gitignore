@@ -38,4 +38,5 @@ cache/raw_statcast/
 !cache/predictions_*.parquet
 !cache/slate_*.json
 !cache/accuracy_history_*.parquet
+!cache/props_history_*.parquet
 cache/raw_airdensity/
