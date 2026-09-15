@@ -107,9 +107,12 @@ if _summary and _summary.get("graded"):
         "lowers the payout tier rather than pushing, so they are excluded.")
 
     if _summary.get("by_confidence"):
-        st.markdown("**By how confident the model was.** If the model has real "
-                    "information, the hit rate should climb with its own "
-                    "confidence.")
+        st.markdown("**By how confident the model was.** This is the honest "
+                    "test: if the model knows something, the hit rate should "
+                    "climb with its own confidence. It does, but only after "
+                    "the predictive distribution was fitted per stat. Under a "
+                    "plain Poisson the top confidence bucket was the *worst* "
+                    "one.")
         _bc = pd.DataFrame(_summary["by_confidence"])
         _bc["hit_pct"] = _bc["hit_pct"].map(lambda v: f"{v:.1f}%")
         st.markdown(store.html_df(

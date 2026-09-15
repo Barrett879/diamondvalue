@@ -42,4 +42,8 @@ cache/raw_statcast/
 # API (no licence, derived from collection their ToS bars). Private on purpose:
 # only the derived aggregate below is published.
 !cache/props_summary_*.json
+# The fitted predictive distributions. MUST be committed: the deployed app
+# reads it to compute P(Over). Fit on our OWN accuracy history, so it
+# contains no third-party line data.
+!cache/prop_calibration_*.json
 cache/raw_airdensity/

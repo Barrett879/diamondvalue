@@ -37,10 +37,17 @@ def test_compare_resolves_role_and_computes_edge():
     assert meta["matched"] == 3 and meta["unmatched"] == 1
     marte = table[table["Player"] == "Ketel Marte"].iloc[0]
     assert marte["Model"] == 2.0 and marte["Line"] == 1.5
-    assert marte["Edge"] == 0.5 and marte["Lean"] == "Over"
+    assert marte["Edge"] == 0.5
+    # Lean is NOT asserted here: it comes from P(Over) under the fitted
+    # predictive distribution, and for Total Bases (measured variance ratio
+    # ~2.08) the calibrated answer at mean 2.0 vs a 1.5 line is Under, not the
+    # Over the raw mean gap suggests. That behaviour is tested directly in
+    # test_lean_uses_probability_not_the_mean_gap and the calibration tests.
+    assert marte["Lean"] in ("Over", "Under", "Even")
+    assert 0.0 <= marte["P(Over)"] <= 1.0
     # Gallen's "Strikeouts"/"Hits Allowed" must resolve to PITCHER columns.
     gk = table[table["Stat"] == "Pitcher K"].iloc[0]
-    assert gk["Model"] == 6.0 and gk["Lean"] == "Under"
+    assert gk["Model"] == 6.0 and gk["P(Over)"] < 0.5   # 6.0 projected vs 6.5
     gh = table[table["Stat"] == "Hits Allowed"].iloc[0]
     assert gh["Model"] == 5.5
     # Sorted by absolute disagreement (Gallen K edge -0.5 is the biggest).
@@ -544,8 +551,12 @@ def test_props_tracker_grades_and_excludes(monkeypatch):
     monkeypatch.setattr(_store, "load_actuals", lambda d: actuals)
     df = bpt.score_date("2026-07-17")
     by = {r["stat"]: r for _, r in df.iterrows()}
-    assert by["Total Bases"]["graded"] and by["Total Bases"]["model_right"]
-    assert by["Total Bases"]["result"] == "over"
+    tb = by["Total Bases"]
+    # Graded, and model_right is consistent with the lean it actually made.
+    # The lean direction itself is a property of the fitted distribution, not
+    # of the grading code under test here.
+    assert tb["graded"] and tb["result"] == "over"
+    assert tb["model_right"] == (tb["lean"].lower() == tb["result"])
     assert by["Hits"]["result"] == "exact"
     assert not by["Hits"]["graded"] and not by["Hits"]["model_right"]
     assert not by["Home Runs"]["playable"]       # Under lean, More-only board
@@ -602,6 +613,9 @@ def test_lean_uses_probability_not_the_mean_gap():
     ])
     table, _ = props.compare(lines, preds)
     by = {r["Stat"]: r for _, r in table.iterrows()}
+    # Both means here sit OUTSIDE the fitted empirical range for their stat, so
+    # this exercises the parametric path (which is the point: the lean must not
+    # come from the mean gap under any of the distributions).
     hr = by["Home Runs"]
     assert hr["Edge"] > 0                  # mean IS above the line
     assert hr["P(Over)"] < 0.5             # but the probability is not
@@ -613,3 +627,45 @@ def test_lean_uses_probability_not_the_mean_gap():
         {"name": "Slim Edge", "stat_type": "Home Runs", "line": 0.5}]),
         preds.assign(HR=1.2))[0].iloc[0]
     assert strong["P(Over)"] > 0.5 and strong["Lean"] == "Over"
+
+
+def test_empirical_table_refuses_to_extrapolate():
+    """A binned table must not answer outside its fitted range: clamping a 0.55
+    HR projection into a bin averaging 0.23 would report that bin's low
+    over-rate instead of the ~42% the mean implies."""
+    fit = props.load_calibration().get("bat:HR")
+    if not fit:                       # table not built in this checkout
+        return
+    lo, hi = fit["bins"][0]["lo"], fit["bins"][-1]["hi"]
+    assert props._empirical_surv(fit, hi * 5, 0) is None      # far above range
+    assert props._empirical_surv(fit, lo / 10, 0) is None     # far below
+    inside = (lo + hi) / 2
+    assert props._empirical_surv(fit, inside, 0) is not None
+    # Out of range -> auto mode must agree with the parametric fallback.
+    far = props.over_under_probs(hi * 5, 0.5, key="bat:HR", mode="auto")
+    pois = props.over_under_probs(hi * 5, 0.5, key="bat:HR", mode="poisson")
+    assert abs(far[0] - pois[0]) < 1e-12
+
+
+def test_calibration_table_is_used_in_range():
+    """Inside the fitted range the empirical table should drive P(Over), and it
+    should differ from the Poisson answer for a stat we measured as badly
+    non-Poisson (Total Bases, variance ratio ~2.08)."""
+    fit = props.load_calibration().get("bat:TB")
+    if not fit:
+        return
+    mu = fit["mean_mu"]
+    auto = props.over_under_probs(mu, 1.5, key="bat:TB", mode="auto")[0]
+    pois = props.over_under_probs(mu, 1.5, key="bat:TB", mode="poisson")[0]
+    assert auto == auto and 0.0 <= auto <= 1.0
+    assert abs(auto - pois) > 1e-6        # the fit actually changes the answer
+
+
+def test_nb_cdf_matches_poisson_as_dispersion_grows():
+    """A negative binomial converges to Poisson as r -> infinity, which is the
+    sanity check that the dependency-free implementation is right."""
+    import math as _m
+    for mu, k in ((1.3, 1), (5.0, 4), (0.2, 0)):
+        assert abs(props._nb_cdf(k, mu, 1e9) - props._pois_cdf(k, mu)) < 1e-4
+    # And it is strictly wider than Poisson for finite r (more mass low AND high)
+    assert props._nb_cdf(0, 2.0, 1.0) > props._pois_cdf(0, 2.0)

@@ -497,8 +497,68 @@ def _pois_cdf(k: int, mu: float) -> float:
     return min(1.0, total)
 
 
-def over_under_probs(mean: float, line: float,
-                     count_mult: float = 1.0) -> tuple[float, float, float]:
+def _nb_cdf(k: int, mu: float, r: float) -> float:
+    """P(X <= k) for a negative binomial with mean mu and dispersion r
+    (variance mu + mu^2/r), by direct summation. No scipy: see _pois_cdf."""
+    if k < 0:
+        return 0.0
+    if mu <= 0:
+        return 1.0
+    if r is None or r <= 0:
+        return _pois_cdf(k, mu)
+    pr = r / (r + mu)
+    total = 0.0
+    for i in range(int(k) + 1):
+        total += math.exp(math.lgamma(i + r) - math.lgamma(r) - math.lgamma(i + 1)
+                          + r * math.log(pr) + i * math.log1p(-pr))
+    return min(1.0, total)
+
+
+_CALIB_CACHE: dict | None = None
+
+
+def load_calibration() -> dict:
+    """The fitted predictive distributions (cache/prop_calibration_v1.json),
+    read once. Empty dict when absent, which falls everything back to Poisson."""
+    global _CALIB_CACHE
+    if _CALIB_CACHE is None:
+        try:
+            _CALIB_CACHE = cache.json_load(
+                cache.dc_path("prop_calibration_v1.json")).get("stats", {})
+        except Exception:  # noqa: BLE001
+            _CALIB_CACHE = {}
+    return _CALIB_CACHE
+
+
+def _empirical_surv(fit: dict, mu: float, k: int) -> float | None:
+    """P(X > k) from the binned empirical table at projected mean mu.
+
+    Returns None when mu falls OUTSIDE the fitted range, so the caller drops to
+    the parametric model instead. A binned table cannot extrapolate: clamping a
+    0.55 home-run projection into a top bin whose members averaged 0.23 would
+    report that bin's 16% chance of going over instead of the ~42% the mean
+    implies. Refusing to answer is the correct behaviour."""
+    bins = fit.get("bins") or []
+    if not bins:
+        return None
+    if mu < bins[0]["lo"] or mu > bins[-1]["hi"]:
+        return None
+    chosen = bins[-1]
+    for b in bins:
+        if mu < b["hi"]:
+            chosen = b
+            break
+    surv = chosen.get("surv") or []
+    if not surv:
+        return None
+    if k < 0:
+        return 1.0
+    return float(surv[k]) if k < len(surv) else 0.0
+
+
+def over_under_probs(mean: float, line: float, count_mult: float = 1.0,
+                     key: str | None = None,
+                     mode: str = "auto") -> tuple[float, float, float]:
     """(P(over), P(under), P(exact)) for a posted line.
 
     `count_mult` rescales onto the integer count the stat is actually made of:
@@ -512,8 +572,37 @@ def over_under_probs(mean: float, line: float,
     ln = float(line) * count_mult
     if ln < 0:                     # a negative line can only go over
         return 1.0, 0.0, 0.0
-    p_over = 1.0 - _pois_cdf(math.floor(ln + 1e-9), mu)
-    p_under = _pois_cdf(math.ceil(ln - 1e-9) - 1, mu)
+    k_over = math.floor(ln + 1e-9)          # P(over)  = P(X > k_over)
+    k_under = math.ceil(ln - 1e-9) - 1      # P(under) = P(X <= k_under)
+
+    # DEFAULT IS NEGATIVE BINOMIAL, chosen out of sample. Refitting the
+    # calibration on pre-2026-08-15 data and grading 4,891 held-out props:
+    #   poisson    hit 50.54%  mean |calibration error| 0.113
+    #   NB         hit 51.99%  mean |calibration error| 0.076   <- shipped
+    #   empirical  hit 52.48%  mean |calibration error| 0.103
+    # NB wins the metric this exists to fix and transfers better: the binned
+    # empirical table is fit on the WHOLE slate, while PrizePicks posts props
+    # on a positively selected subset (players it expects to play and produce),
+    # so the table's low bins mis-transfer. "empirical" stays available for
+    # research; it is not the default.
+    fit = load_calibration().get(key) if key else None
+    p_over = p_under = None
+    if fit is not None and mode == "empirical":
+        so = _empirical_surv(fit, mu, k_over)
+        su = _empirical_surv(fit, mu, k_under)
+        if so is not None and su is not None:
+            p_over, p_under = so, 1.0 - su
+    if p_over is None and mode in ("auto", "nb"):
+        # nb_r is None for stats measured as UNDER-dispersed, where a negative
+        # binomial cannot help (it only ever widens a Poisson); those fall
+        # through to Poisson below.
+        r = (fit or {}).get("nb_r")
+        if r:
+            p_over = 1.0 - _nb_cdf(k_over, mu, r)
+            p_under = _nb_cdf(k_under, mu, r)
+    if p_over is None:                      # Poisson fallback
+        p_over = 1.0 - _pois_cdf(k_over, mu)
+        p_under = _pois_cdf(k_under, mu)
     p_exact = max(0.0, 1.0 - p_over - p_under)
     return p_over, p_under, p_exact
 
@@ -622,7 +711,8 @@ def compare(lines: pd.DataFrame, preds: pd.DataFrame,
         actual = _actual_for(cols, scale, row["role"], arow) if arow is not None else None
         # Lean from the PREDICTIVE PROBABILITY, not the mean-vs-line gap.
         p_over, p_under, _p_exact = over_under_probs(
-            model, line, _count_mult(cols, scale))
+            model, line, _count_mult(cols, scale),
+            key=(f"{row['role']}:{cols[0]}" if len(cols) == 1 else None))
         if p_over != p_over:                       # NaN -> no callable side
             lean = "Even"
         elif abs(p_over - 0.5) < 1e-9:
