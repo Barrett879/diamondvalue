@@ -221,6 +221,25 @@ def write_summary(hist: pd.DataFrame) -> None:
                        "hit_pct": round(100 * pr, 1),
                        "benchmark_pct": round(100 * bench, 1),
                        "skill_pts": round(100 * (pr - bench), 1)})
+    # STAT x DIRECTION, each cell against ITS OWN base rate for that stat and
+    # side. Restricted to n>=100: below that the normal interval degenerates
+    # (tiny cells were producing bounds like [18, 102]) and the cell says
+    # nothing anyway.
+    by_stat_dir = []
+    for stat, sub in g.groupby("stat"):
+        b_over = float((sub["result"] == "over").mean())
+        for lean, bench in (("Over", b_over), ("Under", 1.0 - b_over)):
+            sel = sub[sub["lean"] == lean]
+            if len(sel) < 100:
+                continue
+            pr = sel["model_right"].mean()
+            by_stat_dir.append({
+                "stat": stat, "lean": lean, "n": int(len(sel)),
+                "hit_pct": round(100 * pr, 1),
+                "benchmark_pct": round(100 * bench, 1),
+                "skill_pts": round(100 * (pr - bench), 1)})
+    by_stat_dir.sort(key=lambda r: -r["skill_pts"])
+
     by_stat = []
     for stat, sel in g.groupby("stat"):
         by_stat.append({"stat": stat, "n": int(len(sel)),
@@ -240,6 +259,7 @@ def write_summary(hist: pd.DataFrame) -> None:
         "base_over_pct": round(100 * base_over, 1),
         "always_under_pct": round(100 * (1 - base_over), 1),
         "by_direction": by_dir,
+        "by_stat_direction": by_stat_dir,
         "all_standard": bool((hist["odds_type"] == "standard").all()),
         "by_stat": sorted(by_stat, key=lambda r: -r["n"]),
     }
