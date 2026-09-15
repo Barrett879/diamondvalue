@@ -189,6 +189,23 @@ def write_summary(hist: pd.DataFrame) -> None:
             buckets.append({"bucket": label, "n": int(len(sel)),
                             "right": int(sel["model_right"].sum()),
                             "hit_pct": round(100 * sel["model_right"].mean(), 1)})
+    # Top-confidence slices: the practical question, "how good are the model's
+    # strongest calls". Ranked by |P(Over) - 0.5|, NOT by the raw mean-vs-line
+    # gap, which ranks them backwards (see exp_market_blend.py).
+    import math as _m
+    conf_all = (g["p_over"] - 0.5).abs()
+    slices = []
+    for label, q in (("top 5%", 0.95), ("top 10%", 0.90), ("top 20%", 0.80),
+                     ("top 25%", 0.75)):
+        sel = g[conf_all >= conf_all.quantile(q)]
+        if len(sel) < 50:
+            continue
+        n = len(sel); pr = sel["model_right"].mean()
+        se = _m.sqrt(pr * (1 - pr) / n) * _m.sqrt(1.9)   # clustering design effect
+        slices.append({"slice": label, "n": int(n),
+                       "hit_pct": round(100 * pr, 1),
+                       "ci_lo": round(100 * (pr - 1.96 * se), 1),
+                       "ci_hi": round(100 * (pr + 1.96 * se), 1)})
     by_stat = []
     for stat, sel in g.groupby("stat"):
         by_stat.append({"stat": stat, "n": int(len(sel)),
@@ -204,6 +221,8 @@ def write_summary(hist: pd.DataFrame) -> None:
         "hit_pct": round(100 * g["model_right"].mean(), 1) if len(g) else None,
         "exact": int((hist["result"] == "exact").sum()),
         "by_confidence": buckets,
+        "by_top_slice": slices,
+        "all_standard": bool((hist["odds_type"] == "standard").all()),
         "by_stat": sorted(by_stat, key=lambda r: -r["n"]),
     }
     cache.json_save(cache.dc_path("props_summary_v1.json"), summary)

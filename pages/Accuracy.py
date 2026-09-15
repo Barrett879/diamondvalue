@@ -119,6 +119,26 @@ if _summary and _summary.get("graded"):
             _bc.rename(columns={"bucket": "Model confidence", "n": "N",
                                 "right": "Right", "hit_pct": "Hit %"}),
             label_cols=1, hero=("Hit %",)), unsafe_allow_html=True)
+    if _summary.get("by_top_slice"):
+        st.markdown("**How good are the strongest calls?** Ranked by the "
+                    "model's own confidence. The dashed reference is the rough "
+                    "54 percent per leg a PrizePicks entry needs to break even.")
+        _ts = pd.DataFrame(_summary["by_top_slice"])
+        _ts["hit"] = _ts["hit_pct"].map(lambda v: f"{v:.1f}%")
+        _ts["ci"] = [f"{lo:.1f} to {hi:.1f}" for lo, hi in
+                     zip(_ts["ci_lo"], _ts["ci_hi"])]
+        st.markdown(store.html_df(
+            _ts[["slice", "n", "hit", "ci"]].rename(columns={
+                "slice": "Slice", "n": "N", "hit": "Hit %",
+                "ci": "95% interval"}),
+            label_cols=1, hero=("Hit %",)), unsafe_allow_html=True)
+        st.caption("Intervals are widened for the fact that props on the same "
+                   "slate are not independent. They reach break-even but none "
+                   "of them clear it, so this is not a demonstrated edge. "
+                   + ("Every line here is a standard line: no Demons or "
+                      "Goblins are in this data at all."
+                      if _summary.get("all_standard") else ""))
+
     if _summary.get("by_stat"):
         st.markdown("**By stat.**")
         _bs = pd.DataFrame(_summary["by_stat"])
