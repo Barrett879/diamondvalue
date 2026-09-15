@@ -22,9 +22,13 @@ SENTINEL = "—"
 THEME_DEFAULT_DARK = False
 
 # Nav pages: (label, url). Home is rendered separately.
+# The Accuracy page is deliberately NOT listed and NOT shipped in the repo:
+# it is kept local-only (see .gitignore) so the model-vs-baseline record and
+# the PrizePicks board scoreboard stay off the public site. Never add a nav
+# entry for a page whose file is absent -- Streamlit renders the app shell and
+# then a client-side "not found", which reads as a broken site.
 _NAV_PAGES = [
     ("Player", "/Player"),
-    ("Accuracy", "/Accuracy"),
     ("About", "/About"),
 ]
 

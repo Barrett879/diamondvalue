@@ -13,8 +13,8 @@ API, which means the data derives from collection PrizePicks' terms prohibit.
 It is therefore fine for private curiosity and NOT safe to republish. Two
 consequences are enforced here:
   - the per-line graded history stays OUT of git (see .gitignore)
-  - only a derived AGGREGATE (counts and hit rates, no line values) is
-    committed, and that is what the public Accuracy page reads
+  - the derived aggregate it writes is ALSO local-only now; the Accuracy page
+    that displayed it has been removed from the public site entirely
 
 WHERE THE PREDICTIONS COME FROM
 -------------------------------

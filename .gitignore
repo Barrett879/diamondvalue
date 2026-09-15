@@ -47,3 +47,11 @@ cache/raw_statcast/
 # contains no third-party line data.
 !cache/prop_calibration_*.json
 cache/raw_airdensity/
+
+# ── Accuracy page: LOCAL ONLY, deliberately not on the public site ──────────
+# The page and the aggregate that feeds it are kept out of the repo so the
+# model-vs-baseline record and the PrizePicks board scoreboard are not public.
+# theme.py._NAV_PAGES has no Accuracy entry to match; keep the two in sync, or
+# a nav link to a missing page renders as a broken site.
+pages/Accuracy.py
+cache/props_summary_*.json
