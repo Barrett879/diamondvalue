@@ -711,3 +711,54 @@ def test_parse_boxscore_leaves_batting_none_when_player_did_not_bat():
     ok = by[101]
     assert ok["played"] and ok["H"] == 2 and ok["b2"] == 1 and ok["HR"] == 1
     assert ok["b1"] == 0                      # 2 hits - 1 double - 1 HR
+
+
+# ── Regression: slate freshness must not trust file mtime ────────────────────
+
+def test_get_slate_freshness_ignores_mtime_for_today(tmp_path, monkeypatch):
+    """The bug this guards: slate_*.json files are COMMITTED to the repo, and a
+    fresh clone (every GitHub Actions run) stamps every file with the checkout
+    time. The old mtime-based freshness rule therefore always reported "fresh",
+    so the evening run NEVER refetched and lineup_status was "projected" for
+    100% of batters even at 5:30pm ET. Freshness for today/future dates must
+    come from the stamp we wrote, not the filesystem."""
+    import os
+    import time as _t
+    from mlblib import cache as _cache, fetch as _fetch
+
+    monkeypatch.setattr(_fetch.cache, "dc_path", lambda name: tmp_path / name)
+    calls = []
+
+    def fake_http(url, params, have_stale=False):
+        calls.append(params.get("date"))
+        return {"dates": [{"games": []}]}     # parses to zero games, no network
+
+    monkeypatch.setattr(_fetch, "_http_json", fake_http)
+    D = T = "2026-09-15"
+    p = tmp_path / f"slate_{D.replace('-', '_')}_v1.json"
+
+    # A legacy bare-list file with no stamp must refetch even with a new mtime.
+    _cache.json_save(p, [{"gamePk": 1}])
+    os.utime(p, None)
+    _fetch.get_slate(D, today=T)
+    assert calls == [D], "legacy unstamped slate must refetch"
+
+    # A stamp from two hours ago must refetch even though mtime is seconds old.
+    calls.clear()
+    _cache.json_save(p, {"fetched_at": _t.time() - 7200, "games": [{"gamePk": 1}]})
+    os.utime(p, None)
+    _fetch.get_slate(D, today=T)
+    assert calls == [D], "a fresh mtime must not mask a stale stamp"
+
+    # A genuinely recent stamp is still served from cache (no refetch).
+    calls.clear()
+    _cache.json_save(p, {"fetched_at": _t.time(), "games": [{"gamePk": 7}]})
+    got = _fetch.get_slate(D, today=T)
+    assert calls == [] and [g["gamePk"] for g in got] == [7]
+
+    # And the write path stamps, so the next run can judge freshness at all.
+    calls.clear()
+    p.unlink()
+    _fetch.get_slate(D, today=T)
+    blob = _cache.json_load(p)
+    assert isinstance(blob, dict) and "fetched_at" in blob and "games" in blob

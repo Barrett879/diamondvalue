@@ -163,14 +163,34 @@ def get_slate(date: str, today: str | None = None) -> list[dict]:
     network hard, and even that returns [] rather than raising.
     """
     path = cache.dc_path(f"slate_{date.replace('-', '_')}_v1.json")
-    stale = None
+    stale, fetched_at = None, None
     if path.exists():
         try:
-            stale = cache.json_load(path)
+            blob = cache.json_load(path)
+            # Two shapes: a bare list (legacy) or {"fetched_at", "games"}.
+            if isinstance(blob, dict) and "games" in blob:
+                stale, fetched_at = blob.get("games"), blob.get("fetched_at")
+            else:
+                stale = blob
         except Exception:  # noqa: BLE001
             stale = None
-    if stale is not None and cache.dc_fresh(path, game_date=date, today=today):
-        return stale
+    # FRESHNESS MUST NOT USE FILE MTIME for today/future dates. Slate files are
+    # COMMITTED to the repo, and a fresh clone (every GitHub Actions run) gives
+    # every file an mtime of the checkout, so an mtime rule always reports
+    # "fresh" and the evening run NEVER refetched. That is why lineup_status
+    # was "projected" for 100% of batters even on the 5:30pm ET run: the bot
+    # was reading the slate committed the previous evening, generated before
+    # any lineup existed. Judge by the stamp we wrote instead.
+    if stale is not None:
+        _today = today or time.strftime("%Y-%m-%d", time.localtime())
+        if date < _today:
+            fresh = cache.dc_fresh(path, game_date=date, today=today)
+        elif fetched_at is None:
+            fresh = False          # legacy file, no stamp -> always refetch
+        else:
+            fresh = (time.time() - float(fetched_at)) < 1800
+        if fresh:
+            return stale
 
     params = {
         "sportId": 1,
@@ -198,7 +218,7 @@ def get_slate(date: str, today: str | None = None) -> list[dict]:
     games.sort(key=lambda x: (x.get("officialDate") or "", x.get("gameNumber") or 1,
                               x.get("gameDate") or ""))
     try:
-        cache.json_save(path, games)
+        cache.json_save(path, {"fetched_at": time.time(), "games": games})
     except Exception:  # noqa: BLE001
         pass
     return games
